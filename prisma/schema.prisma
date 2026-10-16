@@ -1,0 +1,66 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id                  String             @id @default(uuid())
+  username            String             @unique
+  email               String             @unique
+  password            String
+  nickname            String
+  avatar              String             @default("avatar_1")
+  totalGames          Int                @default(0)
+  wins                Int                @default(0)
+  losses              Int                @default(0)
+  soloGames           Int                @default(0)
+  soloWins            Int                @default(0)
+  teamGames           Int                @default(0)
+  teamWins            Int                @default(0)
+  nicknameLastChanged DateTime?
+  createdAt           DateTime           @default(now())
+  updatedAt           DateTime           @updatedAt
+
+  matchParticipants   MatchParticipant[]
+
+  @@index([username])
+  @@index([email])
+}
+
+model MatchHistory {
+  id              String             @id @default(uuid())
+  roomCode        String
+  gameMode        String             // "SOLO" | "TEAM_BATTLE"
+  playerCount     Int
+  winnerId        String?
+  winnerNickname  String?
+  winningTeam     String?            // "TEAM_A" | "TEAM_B"
+  endReason       String             // "NORMAL_WIN" | "DEADLOCK"
+  createdAt       DateTime           @default(now())
+
+  participants    MatchParticipant[]
+}
+
+model MatchParticipant {
+  id                   String       @id @default(uuid())
+  matchId              String
+  userId               String
+  userNicknameSnapshot String
+  userAvatarSnapshot   String
+  seatIndex            Int
+  team                 String?      // "TEAM_A" | "TEAM_B"
+  rank                 Int          @default(1)
+  isWinner             Boolean      @default(false)
+  remainingPips        Int          @default(0)
+  remainingTiles       String       @default("[]") // JSON string of tiles in hand at end
+
+  match                MatchHistory @relation(fields: [matchId], references: [id], onDelete: Cascade)
+  user                 User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([matchId])
+  @@index([userId])
+}

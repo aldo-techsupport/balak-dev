@@ -13,6 +13,7 @@ import {
 } from 'lucide-react';
 import { AuthModal } from './AuthModal';
 import { ProfileModal } from './ProfileModal';
+import { getRankInfo } from '@/lib/rank';
 
 const AVATAR_ICONS: Record<string, string> = {
   avatar_1: '🦁',
@@ -34,6 +35,7 @@ export const Navbar: React.FC = () => {
 
   const winRate =
     user && user.totalGames > 0 ? Math.round((user.wins / user.totalGames) * 100) : 0;
+  const rankInfo = getRankInfo(user?.rankTier, user?.rankDivision, user?.rankStars);
 
   return (
     <>
@@ -61,13 +63,33 @@ export const Navbar: React.FC = () => {
           <div className="flex items-center gap-3">
             {user ? (
               <div className="flex items-center gap-3">
+                {/* Rank Badge */}
+                <div
+                  onClick={() => {
+                    setProfileTab('stats');
+                    setShowProfileModal(true);
+                  }}
+                  className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl border cursor-pointer hover:scale-105 transition shadow-sm ${rankInfo.badgeBg} ${rankInfo.badgeBorder}`}
+                  title={`${rankInfo.title} • Klik untuk melihat detail rank`}
+                >
+                  <span className="text-lg">{rankInfo.icon}</span>
+                  <div className="flex flex-col text-left">
+                    <span className={`text-[11px] font-black tracking-tight leading-none ${rankInfo.badgeText}`}>
+                      {rankInfo.title}
+                    </span>
+                    <span className="text-[10px] text-amber-300 font-mono tracking-wider leading-none mt-1">
+                      {rankInfo.starsDisplay}
+                    </span>
+                  </div>
+                </div>
+
                 {/* Win rate pill */}
                 <div
                   onClick={() => {
                     setProfileTab('stats');
                     setShowProfileModal(true);
                   }}
-                  className="hidden sm:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full cursor-pointer hover:border-slate-700 transition"
+                  className="hidden md:flex items-center gap-2 bg-slate-900 border border-slate-800 px-3 py-1.5 rounded-full cursor-pointer hover:border-slate-700 transition"
                   title="Klik untuk melihat statistik"
                 >
                   <Trophy className="w-3.5 h-3.5 text-amber-400" />

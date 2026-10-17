@@ -14,6 +14,12 @@ export interface UserProfile {
   soloWins: number;
   teamGames: number;
   teamWins: number;
+  rankTier?: string;
+  rankDivision?: string;
+  rankStars?: number;
+  rankScore?: number;
+  role?: string;
+  isBanned?: boolean;
 }
 
 interface AuthState {

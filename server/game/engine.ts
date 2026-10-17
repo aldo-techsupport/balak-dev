@@ -17,6 +17,7 @@ import {
   connectTileToBoard,
 } from './domino';
 import { prisma } from '../../src/lib/prisma';
+import { calculateRankResult } from '../../src/lib/rank';
 
 export class GameEngine {
   /**
@@ -25,7 +26,11 @@ export class GameEngine {
   public static initGame(room: RoomData): AuthoritativeGameState {
     const playerIds = room.players.map((p) => p.userId);
     const { hands, drawPile } = dealHands(playerIds);
-    const { startingUserId } = findStartingPlayer(playerIds, hands);
+    const { startingUserId, requiredInitialTile, mustPlayBalak } = findStartingPlayer(
+      playerIds,
+      hands,
+      room.lastWinnerUserId
+    );
 
     const startingPlayer = room.players.find((p) => p.userId === startingUserId)!;
     const now = Date.now();
@@ -45,6 +50,8 @@ export class GameEngine {
       moveHistory: [],
       winnerResult: null,
       isFinished: false,
+      requiredInitialTileId: requiredInitialTile?.id,
+      mustPlayBalak: mustPlayBalak || false,
     };
   }
 
@@ -64,9 +71,16 @@ export class GameEngine {
       }
     }
 
+    const isOpeningMove = game.board.length === 0;
     const playableTileIds =
       game.currentTurnUserId === forUserId && !game.isFinished
-        ? getPlayableTileIds(myHand, game.leftEnd, game.rightEnd)
+        ? getPlayableTileIds(
+            myHand,
+            game.leftEnd,
+            game.rightEnd,
+            isOpeningMove ? game.requiredInitialTileId : undefined,
+            isOpeningMove ? game.mustPlayBalak : false
+          )
         : [];
 
     return {
@@ -84,6 +98,8 @@ export class GameEngine {
       winnerResult: game.winnerResult,
       isFinished: game.isFinished,
       playableTileIds,
+      requiredInitialTileId: isOpeningMove ? game.requiredInitialTileId : undefined,
+      mustPlayBalak: isOpeningMove ? game.mustPlayBalak : false,
     };
   }
 
@@ -118,6 +134,25 @@ export class GameEngine {
     const tile = hand[tileIndex];
     const turnNumber = game.board.length + 1;
 
+    // Opening move validation (Round 1 balak 0 or Round 2+ winner balak)
+    if (game.board.length === 0) {
+      if (game.requiredInitialTileId && tile.id !== game.requiredInitialTileId) {
+        return {
+          success: false,
+          error: `Untuk permainan pertama, kartu pembuka harus Balak 0 (0-0).`,
+        };
+      }
+      if (game.mustPlayBalak && tile.left !== tile.right) {
+        const hasBalakInHand = hand.some((t) => t.left === t.right);
+        if (hasBalakInHand) {
+          return {
+            success: false,
+            error: `Pemenang ronde sebelumnya wajib membuka dengan kartu balak miliknya.`,
+          };
+        }
+      }
+    }
+
     // Validate and connect to board
     const placement = connectTileToBoard(
       game.board,
@@ -147,6 +182,8 @@ export class GameEngine {
       action: 'PLAY',
       tile,
       end: requestedEnd,
+      leftEnd: game.leftEnd,
+      rightEnd: game.rightEnd,
       timestamp: Date.now(),
     });
 
@@ -221,6 +258,8 @@ export class GameEngine {
       userId,
       nickname: player.nickname,
       action: 'PASS',
+      leftEnd: game.leftEnd,
+      rightEnd: game.rightEnd,
       timestamp: Date.now(),
     });
 
@@ -307,6 +346,7 @@ export class GameEngine {
         pips,
         tiles: [...hand],
         isWinner: false,
+        isBot: Boolean(p.isBot),
       };
     });
 
@@ -318,14 +358,24 @@ export class GameEngine {
     if (endReason === 'NORMAL_WIN') {
       winnerId = finisherUserId;
       const winner = room.players.find((p) => p.userId === finisherUserId);
-      winnerNickname = winner?.nickname;
 
       if (isTeamBattle && winner?.team) {
         winningTeam = winner.team;
+        const teamName = winningTeam === 'TEAM_A' ? 'Tim Merah (Tim A)' : 'Tim Biru (Tim B)';
+        const winnerTeammates = room.players
+          .filter((p) => p.team === winningTeam)
+          .map((p) => p.nickname)
+          .join(' & ');
+        winnerNickname = `${teamName} — ${winner.nickname} Gaple! (${winnerTeammates})`;
+        room.lastWinnerUserId = finisherUserId;
+        room.lastWinnerTeam = winningTeam;
+
         pipsSummary.forEach((p) => {
           if (p.team === winningTeam) p.isWinner = true;
         });
       } else {
+        winnerNickname = winner?.nickname;
+        room.lastWinnerUserId = winnerId;
         const winnerSummary = pipsSummary.find((p) => p.userId === winnerId);
         if (winnerSummary) winnerSummary.isWinner = true;
       }
@@ -353,10 +403,19 @@ export class GameEngine {
           winningTeam = lowestPipPlayer.team || 'TEAM_A';
         }
 
+        const teamName = winningTeam === 'TEAM_A' ? 'Tim Merah (Tim A)' : 'Tim Biru (Tim B)';
+        const winningMembers = pipsSummary
+          .filter((p) => p.team === winningTeam)
+          .sort((a, b) => a.pips - b.pips);
+
+        room.lastWinnerUserId = winningMembers[0]?.userId;
+        room.lastWinnerTeam = winningTeam;
+        winnerId = room.lastWinnerUserId;
+        winnerNickname = `${teamName} Menang Buntu! (${teamScores.teamA} vs ${teamScores.teamB} Balak)`;
+
         pipsSummary.forEach((p) => {
           if (p.team === winningTeam) p.isWinner = true;
         });
-        winnerNickname = winningTeam === 'TEAM_A' ? 'Tim Merah (Tim A)' : 'Tim Biru (Tim B)';
       } else {
         // Solo mode: player with minimum pips wins
         const sorted = [...pipsSummary].sort((a, b) => a.pips - b.pips);
@@ -364,7 +423,44 @@ export class GameEngine {
         winnerId = champion.userId;
         winnerNickname = champion.nickname;
         champion.isWinner = true;
+        room.lastWinnerUserId = winnerId;
       }
+    }
+
+    // Rank Progression Calculation
+    try {
+      const userIds = pipsSummary.map((p) => p.userId);
+      const userRecords = await prisma.user.findMany({
+        where: { id: { in: userIds } },
+        select: { id: true, rankTier: true, rankDivision: true, rankStars: true, rankScore: true },
+      });
+      const userMap = new Map(userRecords.map((u) => [u.id, u]));
+
+      for (const p of pipsSummary) {
+        const u = userMap.get(p.userId);
+        const curTier = u?.rankTier || 'WARRIOR';
+        const curDiv = u?.rankDivision || 'III';
+        const curStars = u?.rankStars || 0;
+
+        const rankRes = calculateRankResult(curTier, curDiv, curStars, p.isWinner);
+        const pRank = p as any;
+        pRank.rankTier = rankRes.newTier;
+        pRank.rankDivision = rankRes.newDivision;
+        pRank.rankStars = rankRes.newStars;
+        pRank.starChange = rankRes.starChange;
+        pRank.rankFormatted = rankRes.rankInfo.formatted;
+        pRank.isPromotion = rankRes.isPromotion;
+        pRank.isDemotion = rankRes.isDemotion;
+
+        const slot = room.players.find((pl) => pl.userId === p.userId);
+        if (slot) {
+          slot.rankTier = rankRes.newTier;
+          slot.rankDivision = rankRes.newDivision;
+          slot.rankStars = rankRes.newStars;
+        }
+      }
+    } catch (rankErr) {
+      console.error('[GameEngine] Error calculating rank:', rankErr);
     }
 
     game.winnerResult = {
@@ -394,6 +490,7 @@ export class GameEngine {
 
         // 2. Create Participant snapshots & update account stats
         for (const p of pipsSummary) {
+          const rankData = p as any;
           await tx.matchParticipant.create({
             data: {
               matchId: matchRecord.id,
@@ -405,10 +502,12 @@ export class GameEngine {
               isWinner: p.isWinner,
               remainingPips: p.pips,
               remainingTiles: JSON.stringify(p.tiles),
+              rankStarsChange: rankData.starChange || 0,
+              rankSnapshot: rankData.rankFormatted || 'Warrior III (0★)',
             },
           });
 
-          // Update user aggregate stats
+          // Update user aggregate stats & rank
           await tx.user.update({
             where: { id: p.userId },
             data: {
@@ -419,6 +518,10 @@ export class GameEngine {
               soloWins: !isTeamBattle && p.isWinner ? { increment: 1 } : undefined,
               teamGames: isTeamBattle ? { increment: 1 } : undefined,
               teamWins: isTeamBattle && p.isWinner ? { increment: 1 } : undefined,
+              rankTier: rankData.rankTier || undefined,
+              rankDivision: rankData.rankDivision || undefined,
+              rankStars: rankData.rankStars !== undefined ? rankData.rankStars : undefined,
+              rankScore: { increment: p.isWinner ? 1 : 0 },
             },
           });
         }

@@ -2,6 +2,8 @@ import { NextRequest, NextResponse } from 'next/server';
 import { prisma } from '@/lib/prisma';
 import { getTokenFromRequest, verifyToken } from '@/lib/auth';
 
+export const dynamic = 'force-dynamic';
+
 export async function GET(req: NextRequest) {
   try {
     const token = getTokenFromRequest(req);
@@ -28,6 +30,10 @@ export async function GET(req: NextRequest) {
         soloWins: true,
         teamGames: true,
         teamWins: true,
+        rankTier: true,
+        rankDivision: true,
+        rankStars: true,
+        rankScore: true,
         createdAt: true,
       },
     });

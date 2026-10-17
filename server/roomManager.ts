@@ -1,6 +1,63 @@
 import { GameMode, PlayerSlot, RoomData, Team } from './types';
 import { GameEngine } from './game/engine';
 
+export const HARD_BOT_POOL = [
+  {
+    userId: 'a042c586-91a6-42a1-b9ea-b5228902999f',
+    username: 'bot_hard_1',
+    nickname: '👑 AI Mythic Glory (100★)',
+    avatar: 'avatar_8',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+  {
+    userId: 'cd948096-2c70-4fd4-a695-fab4e5a0b1c1',
+    username: 'bot_hard_2',
+    nickname: '⚡ Dewa Balak Mythic (100★)',
+    avatar: 'avatar_4',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+  {
+    userId: '27f548d3-faf0-4ed9-8810-027034990de5',
+    username: 'bot_hard_3',
+    nickname: '🔥 Grandmaster Gaple (100★)',
+    avatar: 'avatar_1',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+  {
+    userId: 'e5e7d365-2dd0-402e-86b4-3e2de5db2351',
+    username: 'bot_hard_4',
+    nickname: '🤖 Alpha Domino (100★)',
+    avatar: 'avatar_6',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+  {
+    userId: 'c32e1a48-a5a5-4129-8c33-30656fbe69b6',
+    username: 'bot_hard_5',
+    nickname: '🎯 Predator Balak (100★)',
+    avatar: 'avatar_3',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+  {
+    userId: 'ac4691b0-e679-48a6-b5d2-903285f6834e',
+    username: 'bot_hard_6',
+    nickname: '🏆 Sang Juara Mythic (100★)',
+    avatar: 'avatar_5',
+    rankTier: 'MYTHIC',
+    rankDivision: 'Mythic',
+    rankStars: 100,
+  },
+];
+
 export class RoomManager {
   private rooms: Map<string, RoomData> = new Map();
 
@@ -20,7 +77,15 @@ export class RoomManager {
    * Create a new room
    */
   public createRoom(params: {
-    hostUser: { id: string; username: string; nickname: string; avatar: string };
+    hostUser: {
+      id: string;
+      username: string;
+      nickname: string;
+      avatar: string;
+      rankTier?: string;
+      rankDivision?: string;
+      rankStars?: number;
+    };
     name: string;
     mode: GameMode;
     isPublic: boolean;
@@ -42,6 +107,9 @@ export class RoomManager {
       avatar: params.hostUser.avatar,
       seatIndex: 0,
       team: mode === 'TEAM_BATTLE' ? 'TEAM_A' : null,
+      rankTier: params.hostUser.rankTier || 'WARRIOR',
+      rankDivision: params.hostUser.rankDivision || 'III',
+      rankStars: params.hostUser.rankStars || 0,
       isReady: true, // Host is ready by default
       isConnected: true,
       isHost: true,
@@ -60,6 +128,7 @@ export class RoomManager {
       status: 'WAITING',
       players: [hostSlot],
       game: null,
+      roundNumber: 1,
       createdAt: Date.now(),
       lastActiveAt: Date.now(),
     };
@@ -92,7 +161,15 @@ export class RoomManager {
    */
   public joinRoom(
     code: string,
-    user: { id: string; username: string; nickname: string; avatar: string }
+    user: {
+      id: string;
+      username: string;
+      nickname: string;
+      avatar: string;
+      rankTier?: string;
+      rankDivision?: string;
+      rankStars?: number;
+    }
   ): { success: boolean; room?: RoomData; error?: string } {
     const room = this.getRoom(code);
     if (!room) {
@@ -107,6 +184,9 @@ export class RoomManager {
       existing.disconnectedAt = null;
       existing.nickname = user.nickname;
       existing.avatar = user.avatar;
+      if (user.rankTier) existing.rankTier = user.rankTier;
+      if (user.rankDivision) existing.rankDivision = user.rankDivision;
+      if (user.rankStars !== undefined) existing.rankStars = user.rankStars;
       room.lastActiveAt = Date.now();
       return { success: true, room };
     }
@@ -144,6 +224,9 @@ export class RoomManager {
       avatar: user.avatar,
       seatIndex,
       team,
+      rankTier: user.rankTier || 'WARRIOR',
+      rankDivision: user.rankDivision || 'III',
+      rankStars: user.rankStars || 0,
       isReady: false,
       isConnected: true,
       isHost: false,
@@ -263,6 +346,70 @@ export class RoomManager {
   }
 
   /**
+   * Host adds a Hard Mode Bot to an empty seat
+   */
+  public addBot(
+    code: string,
+    hostUserId: string
+  ): { success: boolean; error?: string; room?: RoomData; bot?: PlayerSlot } {
+    const room = this.getRoom(code);
+    if (!room) return { success: false, error: 'Room tidak ditemukan.' };
+
+    if (room.hostId !== hostUserId) {
+      return { success: false, error: 'Hanya host yang dapat menambahkan bot ke meja.' };
+    }
+
+    if (room.status !== 'WAITING') {
+      return { success: false, error: 'Tidak dapat menambah bot saat permainan sedang berlangsung.' };
+    }
+
+    if (room.players.length >= room.maxPlayers) {
+      return { success: false, error: 'Meja sudah penuh.' };
+    }
+
+    // Find next available bot from pool not currently in room
+    const currentOccupiedBotIds = new Set(room.players.map((p) => p.userId));
+    const availableBot = HARD_BOT_POOL.find((b) => !currentOccupiedBotIds.has(b.userId));
+    if (!availableBot) {
+      return { success: false, error: 'Semua bot sedang digunakan di meja ini.' };
+    }
+
+    // Find first free seat index (0..maxPlayers-1)
+    const takenSeats = new Set(room.players.map((p) => p.seatIndex));
+    let seatIndex = 0;
+    while (takenSeats.has(seatIndex) && seatIndex < room.maxPlayers) {
+      seatIndex++;
+    }
+
+    let team: Team | null = null;
+    if (room.mode === 'TEAM_BATTLE') {
+      team = seatIndex % 2 === 0 ? 'TEAM_A' : 'TEAM_B';
+    }
+
+    const botSlot: PlayerSlot = {
+      userId: availableBot.userId,
+      username: availableBot.username,
+      nickname: availableBot.nickname,
+      avatar: availableBot.avatar,
+      seatIndex,
+      team,
+      rankTier: availableBot.rankTier,
+      rankDivision: availableBot.rankDivision,
+      rankStars: availableBot.rankStars,
+      isReady: true, // Bots are ready immediately
+      isConnected: true,
+      isHost: false,
+      isBot: true,
+      socketId: null,
+      disconnectedAt: null,
+    };
+
+    room.players.push(botSlot);
+    room.lastActiveAt = Date.now();
+    return { success: true, room, bot: botSlot };
+  }
+
+  /**
    * Host starts the game
    */
   public startGame(
@@ -317,6 +464,33 @@ export class RoomManager {
   }
 
   /**
+   * Reset room for next round without kicking players out
+   */
+  public resetRoomForNextRound(
+    code: string,
+    userId: string
+  ): { success: boolean; error?: string; room?: RoomData } {
+    const room = this.getRoom(code);
+    if (!room) return { success: false, error: 'Room tidak ditemukan.' };
+
+    const player = room.players.find((p) => p.userId === userId);
+    if (!player) return { success: false, error: 'Pemain tidak ditemukan di room.' };
+
+    // Reset status to WAITING and clear previous game board
+    room.status = 'WAITING';
+    room.game = null;
+    room.roundNumber = (room.roundNumber || 1) + 1;
+
+    // Reset ready states: host & bots are ready, other human players need to ready up
+    room.players.forEach((p) => {
+      p.isReady = p.isHost || Boolean(p.isBot);
+    });
+
+    room.lastActiveAt = Date.now();
+    return { success: true, room };
+  }
+
+  /**
    * Mark player disconnected
    */
   public handleDisconnect(socketId: string): { room?: RoomData; userId?: string } {
@@ -343,6 +517,10 @@ export class RoomManager {
     maxPlayers: number;
     status: string;
     hostNickname: string;
+    hostAvatar?: string;
+    hostRankTier?: string;
+    hostRankDivision?: string;
+    roundNumber?: number;
   }[] {
     const publicList = [];
     for (const room of this.rooms.values()) {
@@ -356,6 +534,10 @@ export class RoomManager {
           maxPlayers: room.maxPlayers,
           status: room.status,
           hostNickname: host?.nickname || 'Host',
+          hostAvatar: host?.avatar,
+          hostRankTier: host?.rankTier,
+          hostRankDivision: host?.rankDivision,
+          roundNumber: room.roundNumber || 1,
         });
       }
     }
@@ -384,6 +566,51 @@ export class RoomManager {
         this.rooms.delete(code);
       }
     }
+  }
+
+  /**
+   * Get all rooms for admin panel inspection
+   */
+  public getAllRoomsDetailed(): any[] {
+    const list = [];
+    for (const room of this.rooms.values()) {
+      list.push({
+        code: room.code,
+        name: room.name,
+        mode: room.mode,
+        isPublic: room.isPublic,
+        playerCount: room.players.length,
+        maxPlayers: room.maxPlayers,
+        status: room.status,
+        roundNumber: room.roundNumber || 1,
+        lastActiveAt: room.lastActiveAt,
+        players: room.players.map((p) => ({
+          userId: p.userId,
+          username: p.username,
+          nickname: p.nickname,
+          avatar: p.avatar,
+          seatIndex: p.seatIndex,
+          team: p.team,
+          isHost: p.isHost,
+          isReady: p.isReady,
+          isConnected: p.isConnected,
+          rankTier: p.rankTier,
+          rankDivision: p.rankDivision,
+          rankStars: p.rankStars,
+        })),
+      });
+    }
+    return list;
+  }
+
+  /**
+   * Force close a room by admin
+   */
+  public forceCloseRoom(code: string): { success: boolean; room?: RoomData } {
+    const room = this.rooms.get(code);
+    if (!room) return { success: false };
+    this.rooms.delete(code);
+    return { success: true, room };
   }
 }
 

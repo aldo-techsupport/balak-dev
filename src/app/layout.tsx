@@ -5,7 +5,7 @@ import { Navbar } from '@/components/Navbar';
 export const metadata: Metadata = {
   title: 'BALAK 3D — Game Gaple Real-Time Multiplayer Online',
   description:
-    'Game Gaple Domino 3D Real-time online multiplayer authoritative dengan PostgreSQL, Next.js, dan Socket.IO. Dilengkapi sistem room, mode Solo & Team Battle 2 vs 2, serta riwayat pertandingan.',
+    'Game Gaple Domino 3D Real-Time Online Multiplayer. Dilengkapi sistem room, mode Solo & Team Battle 2 vs 2, serta sistem rank kompetitif.',
 };
 
 export default function RootLayout({

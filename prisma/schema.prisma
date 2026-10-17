@@ -21,6 +21,13 @@ model User {
   soloWins            Int                @default(0)
   teamGames           Int                @default(0)
   teamWins            Int                @default(0)
+  rankTier            String             @default("WARRIOR") // "WARRIOR" | "ELITE" | "MASTER" | "GRANDMASTER" | "EPIC" | "LEGEND" | "MYTHIC"
+  rankDivision        String             @default("III")     // "III", "II", "I", "IV", "V", "Mythic"
+  rankStars           Int                @default(0)         // Bintang saat ini di divisi
+  rankScore           Int                @default(0)         // Total poin / MMR akumulasi
+  role                String             @default("user")    // "user" | "admin" | "bot"
+  isBanned            Boolean            @default(false)
+  isBot               Boolean            @default(false)
   nicknameLastChanged DateTime?
   createdAt           DateTime           @default(now())
   updatedAt           DateTime           @updatedAt
@@ -57,6 +64,8 @@ model MatchParticipant {
   isWinner             Boolean      @default(false)
   remainingPips        Int          @default(0)
   remainingTiles       String       @default("[]") // JSON string of tiles in hand at end
+  rankStarsChange      Int          @default(0)    // +1, -1, 0
+  rankSnapshot         String       @default("Warrior III (0★)")
 
   match                MatchHistory @relation(fields: [matchId], references: [id], onDelete: Cascade)
   user                 User         @relation(fields: [userId], references: [id], onDelete: Cascade)

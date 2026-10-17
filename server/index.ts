@@ -31,6 +31,38 @@ const server = http.createServer((req, res) => {
     return;
   }
 
+  if (req.url === '/api/admin/rooms' && req.method === 'GET') {
+    const allRooms = roomManager.getAllRoomsDetailed();
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ rooms: allRooms }));
+    return;
+  }
+
+  if (req.url === '/api/admin/rooms/close' && req.method === 'POST') {
+    let body = '';
+    req.on('data', (chunk) => { body += chunk; });
+    req.on('end', () => {
+      try {
+        const { roomCode } = JSON.parse(body || '{}');
+        if (!roomCode) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'roomCode required' }));
+          return;
+        }
+        const result = roomManager.forceCloseRoom(roomCode);
+        if (result.success && result.room) {
+          io.to(roomCode).emit('room:closed_by_admin', { message: 'Meja ini telah ditutup oleh Administrator.' });
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ success: true, roomCode }));
+      } catch (err: any) {
+        res.writeHead(500, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: err.message }));
+      }
+    });
+    return;
+  }
+
   res.writeHead(404, { 'Content-Type': 'application/json' });
   res.end(JSON.stringify({ error: 'Not found' }));
 });

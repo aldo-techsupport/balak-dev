@@ -99,6 +99,10 @@ export async function POST(req: NextRequest) {
         soloWins: user.soloWins,
         teamGames: user.teamGames,
         teamWins: user.teamWins,
+        rankTier: user.rankTier,
+        rankDivision: user.rankDivision,
+        rankStars: user.rankStars,
+        rankScore: user.rankScore,
       },
     });
 

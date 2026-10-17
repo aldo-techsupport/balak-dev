@@ -32,6 +32,14 @@ export interface GameWinnerResult {
     pips: number;
     tiles: DominoTile[];
     isWinner: boolean;
+    isBot?: boolean;
+    rankTier?: string;
+    rankDivision?: string;
+    rankStars?: number;
+    starChange?: number;
+    rankFormatted?: string;
+    isPromotion?: boolean;
+    isDemotion?: boolean;
   }[];
   teamScores?: {
     teamA: number;
@@ -54,6 +62,8 @@ export interface ClientGameState {
   winnerResult: GameWinnerResult | null;
   isFinished: boolean;
   playableTileIds: string[];
+  requiredInitialTileId?: string;
+  mustPlayBalak?: boolean;
 }
 
 interface GameStoreState {
@@ -70,6 +80,7 @@ interface GameStoreState {
   passTurn: (roomCode: string) => void;
   initGameSocketListeners: (myUserId: string) => void;
   clearGame: () => void;
+  resetGame: () => void;
 }
 
 export const useGameStore = create<GameStoreState>((set, get) => ({
@@ -84,6 +95,15 @@ export const useGameStore = create<GameStoreState>((set, get) => ({
   clearSelection: () => set({ selectedTileId: null, needsSideSelection: false }),
 
   clearGame: () =>
+    set({
+      gameState: null,
+      selectedTileId: null,
+      needsSideSelection: false,
+      isActionInProgress: false,
+      errorMessage: null,
+    }),
+
+  resetGame: () =>
     set({
       gameState: null,
       selectedTileId: null,

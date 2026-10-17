@@ -13,6 +13,7 @@ import {
   BarChart3,
   Calendar,
 } from 'lucide-react';
+import { getRankInfo, RANK_TIERS } from '@/lib/rank';
 
 interface ProfileModalProps {
   initialTab?: 'profile' | 'stats' | 'history';
@@ -228,6 +229,59 @@ export const ProfileModal: React.FC<ProfileModalProps> = ({
                 <div className="py-12 text-center text-slate-400">Memuat statistik...</div>
               ) : (
                 <>
+                  {/* Rank Showcase */}
+                  {(() => {
+                    const rankInfo = getRankInfo(user.rankTier, user.rankDivision, user.rankStars);
+                    return (
+                      <div className={`p-4 rounded-3xl border ${rankInfo.badgeBg} ${rankInfo.badgeBorder} shadow-lg relative overflow-hidden`}>
+                        <div className="flex items-center justify-between">
+                          <div className="flex items-center gap-3">
+                            <span className="text-4xl filter drop-shadow">{rankInfo.icon}</span>
+                            <div>
+                              <div className="flex items-center gap-2">
+                                <h3 className={`text-lg font-black tracking-tight ${rankInfo.badgeText}`}>
+                                  {rankInfo.title}
+                                </h3>
+                                <span className="text-[10px] px-2 py-0.5 rounded-full bg-slate-900/80 border border-slate-700 text-slate-300 font-semibold">
+                                  Rank Aktif
+                                </span>
+                              </div>
+                              <p className="text-xs text-amber-300 font-mono tracking-widest mt-0.5">
+                                {rankInfo.starsDisplay}
+                              </p>
+                            </div>
+                          </div>
+                          <div className="text-right">
+                            <span className="text-[10px] text-slate-400 uppercase font-semibold block">Total Rank Poin</span>
+                            <span className="text-base font-black font-mono text-white">{user.rankScore || 0}</span>
+                          </div>
+                        </div>
+
+                        {/* Rank Tier Path */}
+                        <div className="mt-4 pt-3 border-t border-slate-800/80 grid grid-cols-7 gap-1 text-center">
+                          {RANK_TIERS.map((tier) => {
+                            const isCurrent = (user.rankTier || 'WARRIOR').toUpperCase() === tier.tier;
+                            return (
+                              <div
+                                key={tier.tier}
+                                className={`p-1.5 rounded-xl border transition ${
+                                  isCurrent
+                                    ? `${tier.badgeBg} ${tier.badgeBorder} scale-105 shadow-md`
+                                    : 'bg-slate-950/40 border-slate-800/40 opacity-40'
+                                }`}
+                              >
+                                <span className="text-base block">{tier.icon}</span>
+                                <span className="text-[9px] font-bold block truncate text-slate-300 mt-0.5">
+                                  {tier.name}
+                                </span>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    );
+                  })()}
+
                   {/* Overall Summary Cards */}
                   <div className="grid grid-cols-3 gap-3">
                     <div className="bg-slate-950 border border-slate-800 p-3 rounded-2xl text-center">

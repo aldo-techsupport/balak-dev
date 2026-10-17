@@ -52,20 +52,55 @@ export function dealHands(
 
 /**
  * Find the player who should move first:
- * Priority 1: Highest balak (double), from 6-6 down to 0-0.
- * Priority 2: If no doubles held by anyone, highest pip sum tile.
+ * - Round 1 (first game): Player holding balak 0 (0-0) starts and opens with balak 0.
+ * - Subsequent games: Previous winner starts first and must play their balak if they have one.
  */
 export function findStartingPlayer(
   playerIds: string[],
-  hands: Record<string, DominoTile[]>
-): { startingUserId: string; requiredInitialTile?: DominoTile } {
-  // Check doubles from 6 down to 0
-  for (let val = 6; val >= 0; val--) {
+  hands: Record<string, DominoTile[]>,
+  lastWinnerUserId?: string
+): {
+  startingUserId: string;
+  requiredInitialTile?: DominoTile;
+  mustPlayBalak?: boolean;
+} {
+  // If subsequent game and previous winner is present
+  if (lastWinnerUserId && playerIds.includes(lastWinnerUserId)) {
+    const winnerHand = hands[lastWinnerUserId] || [];
+    const winnerDoubles = winnerHand.filter((t) => t.left === t.right);
+    const hasBalak = winnerDoubles.length > 0;
+
+    return {
+      startingUserId: lastWinnerUserId,
+      mustPlayBalak: hasBalak,
+      requiredInitialTile: undefined, // Winner can choose among their balaks, or any card if no balak
+    };
+  }
+
+  // Round 1 (First game): Player holding Balak 0 ("0-0") starts!
+  for (const userId of playerIds) {
+    const tile = hands[userId]?.find((t) => t.id === '0-0');
+    if (tile) {
+      return {
+        startingUserId: userId,
+        requiredInitialTile: tile,
+        mustPlayBalak: true,
+      };
+    }
+  }
+
+  // Fallback if 0-0 was somehow not dealt (e.g. 2-player draw pile):
+  // Check doubles from 1-1 up to 6-6
+  for (let val = 1; val <= 6; val++) {
     const doubleId = `${val}-${val}`;
     for (const userId of playerIds) {
       const tile = hands[userId]?.find((t) => t.id === doubleId);
       if (tile) {
-        return { startingUserId: userId, requiredInitialTile: tile };
+        return {
+          startingUserId: userId,
+          requiredInitialTile: tile,
+          mustPlayBalak: true,
+        };
       }
     }
   }
@@ -87,7 +122,7 @@ export function findStartingPlayer(
     }
   }
 
-  return { startingUserId, requiredInitialTile: bestTile };
+  return { startingUserId, requiredInitialTile: bestTile, mustPlayBalak: false };
 }
 
 /**
@@ -110,10 +145,21 @@ export function getHandPips(hand: DominoTile[]): number {
 export function getPlayableTileIds(
   hand: DominoTile[],
   leftEnd: number | null,
-  rightEnd: number | null
+  rightEnd: number | null,
+  requiredInitialTileId?: string,
+  mustPlayBalak?: boolean
 ): string[] {
-  // If board is empty, any tile in hand can be played
+  // If board is empty
   if (leftEnd === null || rightEnd === null) {
+    if (requiredInitialTileId && hand.some((t) => t.id === requiredInitialTileId)) {
+      return [requiredInitialTileId];
+    }
+    if (mustPlayBalak) {
+      const balaks = hand.filter((t) => t.left === t.right);
+      if (balaks.length > 0) {
+        return balaks.map((t) => t.id);
+      }
+    }
     return hand.map((t) => t.id);
   }
 

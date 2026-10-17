@@ -11,6 +11,7 @@ export interface TokenPayload {
   username: string;
   nickname: string;
   avatar: string;
+  role?: string;
   iat?: number;
   exp?: number;
 }
@@ -97,4 +98,12 @@ export function checkRateLimit(ip: string, maxAttempts: number = 10, windowMs: n
 
   record.count += 1;
   return { allowed: true, remaining: maxAttempts - record.count };
+}
+
+export function verifyAdminFromRequest(req: NextRequest): TokenPayload | null {
+  const token = getTokenFromRequest(req);
+  if (!token) return null;
+  const payload = verifyToken(token);
+  if (!payload || payload.role !== 'admin') return null;
+  return payload;
 }

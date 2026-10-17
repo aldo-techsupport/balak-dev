@@ -24,6 +24,10 @@ export interface PlayerSlot {
   avatar: string;
   seatIndex: number; // 0..3
   team: Team | null; // For TEAM_BATTLE: seats 0,2 = TEAM_A, seats 1,3 = TEAM_B
+  rankTier?: string;
+  rankDivision?: string;
+  rankStars?: number;
+  isBot?: boolean;
   isReady: boolean;
   isConnected: boolean;
   isHost: boolean;
@@ -37,6 +41,8 @@ export interface GameMoveRecord {
   action: 'PLAY' | 'PASS' | 'DRAW';
   tile?: DominoTile;
   end?: 'LEFT' | 'RIGHT';
+  leftEnd?: number | null;
+  rightEnd?: number | null;
   timestamp: number;
 }
 
@@ -54,6 +60,14 @@ export interface GameWinnerResult {
     pips: number;
     tiles: DominoTile[];
     isWinner: boolean;
+    isBot?: boolean;
+    rankTier?: string;
+    rankDivision?: string;
+    rankStars?: number;
+    starChange?: number;
+    rankFormatted?: string;
+    isPromotion?: boolean;
+    isDemotion?: boolean;
   }[];
   teamScores?: {
     teamA: number;
@@ -75,6 +89,8 @@ export interface AuthoritativeGameState {
   moveHistory: GameMoveRecord[];
   winnerResult: GameWinnerResult | null;
   isFinished: boolean;
+  requiredInitialTileId?: string;
+  mustPlayBalak?: boolean;
 }
 
 export interface SanitizedGameState {
@@ -92,6 +108,8 @@ export interface SanitizedGameState {
   winnerResult: GameWinnerResult | null;
   isFinished: boolean;
   playableTileIds: string[]; // Helper for client: tile IDs that can legally be played
+  requiredInitialTileId?: string;
+  mustPlayBalak?: boolean;
 }
 
 export interface RoomData {
@@ -105,6 +123,9 @@ export interface RoomData {
   status: RoomStatus;
   players: PlayerSlot[];
   game: AuthoritativeGameState | null;
+  roundNumber: number;
+  lastWinnerUserId?: string;
+  lastWinnerTeam?: Team;
   createdAt: number;
   lastActiveAt: number;
 }

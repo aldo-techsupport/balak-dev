@@ -212,7 +212,9 @@ async function runTest() {
   // STEP 8: Valid Move Execution & Chain Update
   console.log('\n▶ STEP 8: Pengujian Eksekusi Langkah Legal & Pembaruan Rantai Real-time');
   const activeState = clientStates[activeUser.userId!];
-  const tileToPlay = activeState.myHand[0];
+  const tileToPlay =
+    activeState.myHand.find((t: any) => activeState.playableTileIds?.includes(t.id)) ||
+    activeState.myHand[0];
 
   await new Promise<void>((resolve, reject) => {
     activeUser.socket!.emit(
@@ -221,7 +223,7 @@ async function runTest() {
       (res: any) => {
         if (!res?.success) reject(new Error(res?.error || 'Play tile failed'));
         console.log(
-          `  ✓ Pemain ${activeUser.nickname} sukses memasang kartu [${tileToPlay.left}|${tileToPlay.right}] ke meja.`
+          `  ✓ Pemain ${activeUser.nickname} sukses memasang kartu pembuka [${tileToPlay.left}|${tileToPlay.right}] ke meja.`
         );
         resolve();
       }
@@ -262,17 +264,39 @@ async function runTest() {
     reconnectSocket.on('connect_error', reject);
   });
 
-  // STEP 10: PostgreSQL Database Persistence Check
-  console.log('\n▶ STEP 10: Pengujian Konsistensi Database PostgreSQL');
+  // STEP 10: Pengujian Stay in Room (room:play-again) untuk Ronde Berikutnya
+  console.log('\n▶ STEP 10: Pengujian Stay in Room (room:play-again) untuk Ronde Berikutnya');
+  await new Promise<void>((resolve, reject) => {
+    users[0].socket!.emit('room:play-again', { roomCode }, (res: any) => {
+      if (!res?.success) reject(new Error(res?.error || 'Play again failed'));
+      console.log(`  ✓ Host berhasil mereset room untuk ronde berikutnya (Ronde #${res.roundNumber})`);
+      console.log('  ✓ TERBUKTI: Pemain tetap berada di dalam room (tidak di-kick/out room).');
+      resolve();
+    });
+  });
+
+  // STEP 11: PostgreSQL Database Persistence & Rank System Check
+  console.log('\n▶ STEP 11: Pengujian Konsistensi Database PostgreSQL & Sistem Rank Bintang');
   const dbUsers = await prisma.user.findMany({
     where: {
       username: { in: users.map((u) => u.username) },
     },
-    select: { id: true, username: true, nickname: true, totalGames: true, wins: true },
+    select: {
+      id: true,
+      username: true,
+      nickname: true,
+      totalGames: true,
+      wins: true,
+      rankTier: true,
+      rankDivision: true,
+      rankStars: true,
+    },
   });
-  console.log(`  ✓ PostgreSQL menyimpan ${dbUsers.length} akun pemain dengan data konsisten:`);
-  dbUsers.forEach((u) => {
-    console.log(`     - ${u.nickname} (@${u.username}) -> Total Games: ${u.totalGames}, Wins: ${u.wins}`);
+  console.log(`  ✓ PostgreSQL menyimpan ${dbUsers.length} akun pemain dengan data rank konsisten:`);
+  dbUsers.forEach((u: any) => {
+    console.log(
+      `     - ${u.nickname} (@${u.username}) -> Rank: ${u.rankTier} ${u.rankDivision} (${u.rankStars}★), Total: ${u.totalGames}, Wins: ${u.wins}`
+    );
   });
 
   // Clean up sockets

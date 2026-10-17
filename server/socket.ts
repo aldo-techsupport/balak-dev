@@ -4,6 +4,7 @@ import { verifyToken, TokenPayload } from '../src/lib/auth';
 import { prisma } from '../src/lib/prisma';
 import { roomManager } from './roomManager';
 import { GameEngine } from './game/engine';
+import { DominoBotAI } from './game/botAI';
 import { RoomData, ChatMessage } from './types';
 
 interface AuthenticatedSocket extends Socket {
@@ -12,6 +13,9 @@ interface AuthenticatedSocket extends Socket {
     username: string;
     nickname: string;
     avatar: string;
+    rankTier?: string;
+    rankDivision?: string;
+    rankStars?: number;
   };
 }
 
@@ -39,7 +43,15 @@ export function registerSocketHandlers(io: SocketIOServer) {
       // Fetch fresh user data from PostgreSQL
       const user = await prisma.user.findUnique({
         where: { id: payload.userId },
-        select: { id: true, username: true, nickname: true, avatar: true },
+        select: {
+          id: true,
+          username: true,
+          nickname: true,
+          avatar: true,
+          rankTier: true,
+          rankDivision: true,
+          rankStars: true,
+        },
       });
 
       if (!user) {
@@ -76,6 +88,9 @@ export function registerSocketHandlers(io: SocketIOServer) {
       maxPlayers: room.maxPlayers,
       hostId: room.hostId,
       status: room.status,
+      roundNumber: room.roundNumber,
+      lastWinnerUserId: room.lastWinnerUserId,
+      lastWinnerTeam: room.lastWinnerTeam,
       players: room.players.map((p) => ({
         userId: p.userId,
         username: p.username,
@@ -83,16 +98,86 @@ export function registerSocketHandlers(io: SocketIOServer) {
         avatar: p.avatar,
         seatIndex: p.seatIndex,
         team: p.team,
+        rankTier: p.rankTier,
+        rankDivision: p.rankDivision,
+        rankStars: p.rankStars,
         isReady: p.isReady,
         isConnected: p.isConnected,
         isHost: p.isHost,
+        isBot: Boolean(p.isBot),
       })),
     });
+    if (room.isPublic) {
+      broadcastPublicRooms();
+    }
+  };
+
+  const broadcastPublicRooms = () => {
+    io.emit('rooms:list-updated', roomManager.getPublicRooms());
+  };
+
+  // Automated execution for Hard Mode AI bots
+  const checkAndTriggerBotTurn = (room: RoomData) => {
+    const game = room.game;
+    if (!game || game.isFinished || room.status !== 'PLAYING') return;
+
+    const currentTurnUserId = game.currentTurnUserId;
+    const currentSlot = room.players.find((p) => p.userId === currentTurnUserId);
+    if (!currentSlot || !currentSlot.isBot) return;
+
+    // Natural delay so human players can see the turn indicator & flow (700ms - 1300ms)
+    const delayMs = Math.floor(Math.random() * 600) + 700;
+
+    setTimeout(async () => {
+      // Re-verify room & turn validity
+      if (room.status !== 'PLAYING' || !room.game || room.game.isFinished) return;
+      if (room.game.currentTurnUserId !== currentTurnUserId) return;
+
+      const decision = DominoBotAI.getBestMove(
+        room.game,
+        currentTurnUserId,
+        room.mode,
+        room.players
+      );
+
+      let moveResult: { success: boolean; isGameOver?: boolean; error?: string };
+      if (decision.action === 'PLAY' && decision.tileId && decision.end) {
+        moveResult = await GameEngine.playTile(
+          room,
+          currentTurnUserId,
+          decision.tileId,
+          decision.end
+        );
+      } else {
+        moveResult = await GameEngine.passTurn(room, currentTurnUserId);
+      }
+
+      broadcastGameState(room);
+
+      if (moveResult.isGameOver) {
+        io.to(room.code).emit('game:finished', room.game.winnerResult);
+        room.status = 'FINISHED';
+        broadcastRoomUpdate(room);
+      } else {
+        // Chain to next bot if next turn is also a bot
+        checkAndTriggerBotTurn(room);
+      }
+    }, delayMs);
   };
 
   io.on('connection', (socket: AuthenticatedSocket) => {
     const user = socket.user!;
     console.log(`[Socket Connected] User ${user.nickname} (${user.id}) - Socket ID: ${socket.id}`);
+
+    // Send public rooms list to newly connected client immediately
+    socket.emit('rooms:list-updated', roomManager.getPublicRooms());
+
+    // --- EVENT: rooms:request ---
+    socket.on('rooms:request', (ack?: (rooms: any[]) => void) => {
+      const list = roomManager.getPublicRooms();
+      if (ack) ack(list);
+      else socket.emit('rooms:list-updated', list);
+    });
 
     // Check if user was in a game room and reconnect them
     const existingRoom = roomManager.findUserRoom(user.id);
@@ -140,6 +225,9 @@ export function registerSocketHandlers(io: SocketIOServer) {
           maxPlayers: room.maxPlayers,
           hostId: room.hostId,
           status: room.status,
+          roundNumber: room.roundNumber,
+          lastWinnerUserId: room.lastWinnerUserId,
+          lastWinnerTeam: room.lastWinnerTeam,
           players: room.players.map((p) => ({
             userId: p.userId,
             username: p.username,
@@ -147,9 +235,13 @@ export function registerSocketHandlers(io: SocketIOServer) {
             avatar: p.avatar,
             seatIndex: p.seatIndex,
             team: p.team,
+            rankTier: p.rankTier,
+            rankDivision: p.rankDivision,
+            rankStars: p.rankStars,
             isReady: p.isReady,
             isConnected: p.isConnected,
             isHost: p.userId === room.hostId,
+            isBot: Boolean(p.isBot),
           })),
         };
 
@@ -216,6 +308,9 @@ export function registerSocketHandlers(io: SocketIOServer) {
           maxPlayers: room.maxPlayers,
           hostId: room.hostId,
           status: room.status,
+          roundNumber: room.roundNumber,
+          lastWinnerUserId: room.lastWinnerUserId,
+          lastWinnerTeam: room.lastWinnerTeam,
           players: room.players.map((p) => ({
             userId: p.userId,
             username: p.username,
@@ -223,9 +318,13 @@ export function registerSocketHandlers(io: SocketIOServer) {
             avatar: p.avatar,
             seatIndex: p.seatIndex,
             team: p.team,
+            rankTier: p.rankTier,
+            rankDivision: p.rankDivision,
+            rankStars: p.rankStars,
             isReady: p.isReady,
             isConnected: p.isConnected,
             isHost: p.isHost,
+            isBot: Boolean(p.isBot),
           })),
         };
 
@@ -278,6 +377,9 @@ export function registerSocketHandlers(io: SocketIOServer) {
           maxPlayers: room.maxPlayers,
           hostId: room.hostId,
           status: room.status,
+          roundNumber: room.roundNumber,
+          lastWinnerUserId: room.lastWinnerUserId,
+          lastWinnerTeam: room.lastWinnerTeam,
           players: room.players.map((p) => ({
             userId: p.userId,
             username: p.username,
@@ -285,9 +387,13 @@ export function registerSocketHandlers(io: SocketIOServer) {
             avatar: p.avatar,
             seatIndex: p.seatIndex,
             team: p.team,
+            rankTier: p.rankTier,
+            rankDivision: p.rankDivision,
+            rankStars: p.rankStars,
             isReady: p.isReady,
             isConnected: p.isConnected,
             isHost: p.isHost,
+            isBot: Boolean(p.isBot),
           })),
         };
 
@@ -332,10 +438,30 @@ export function registerSocketHandlers(io: SocketIOServer) {
         io.to(room.code).emit('room:started', { code: room.code });
         broadcastRoomUpdate(room);
         broadcastGameState(room);
+        checkAndTriggerBotTurn(room);
 
         if (ack) ack({ success: true });
       } catch (err: any) {
         console.error('[room:start] Error:', err);
+        if (ack) ack({ success: false, error: err.message });
+      }
+    });
+
+    // --- EVENT: room:add-bot ---
+    socket.on('room:add-bot', (payload: any, ack?: (res: any) => void) => {
+      try {
+        const { roomCode } = payload || {};
+        const addResult = roomManager.addBot(roomCode, user.id);
+        if (!addResult.success || !addResult.room) {
+          if (ack) ack({ success: false, error: addResult.error });
+          return;
+        }
+
+        const room = addResult.room;
+        broadcastRoomUpdate(room);
+        if (ack) ack({ success: true, bot: addResult.bot });
+      } catch (err: any) {
+        console.error('[room:add-bot] Error:', err);
         if (ack) ack({ success: false, error: err.message });
       }
     });
@@ -371,11 +497,35 @@ export function registerSocketHandlers(io: SocketIOServer) {
         if (!leaveResult.roomDeleted && leaveResult.room) {
           io.to(roomCode).emit('room:player-left', { userId: user.id });
           broadcastRoomUpdate(leaveResult.room);
+        } else {
+          broadcastPublicRooms();
         }
 
         if (ack) ack({ success: true });
       } catch (err: any) {
         console.error('[room:leave] Error:', err);
+        if (ack) ack({ success: false, error: err.message });
+      }
+    });
+
+    // --- EVENT: room:play-again ---
+    // Stay in room, reset board, return room to WAITING for next round
+    socket.on('room:play-again', (payload: any, ack?: (res: any) => void) => {
+      try {
+        const { roomCode } = payload || {};
+        const resetResult = roomManager.resetRoomForNextRound(roomCode, user.id);
+        if (!resetResult.success || !resetResult.room) {
+          if (ack) ack({ success: false, error: resetResult.error });
+          return;
+        }
+
+        const room = resetResult.room;
+        io.to(room.code).emit('room:reset', { roundNumber: room.roundNumber });
+        broadcastRoomUpdate(room);
+
+        if (ack) ack({ success: true, roundNumber: room.roundNumber });
+      } catch (err: any) {
+        console.error('[room:play-again] Error:', err);
         if (ack) ack({ success: false, error: err.message });
       }
     });
@@ -404,6 +554,8 @@ export function registerSocketHandlers(io: SocketIOServer) {
           io.to(room.code).emit('game:finished', room.game?.winnerResult);
           room.status = 'FINISHED';
           broadcastRoomUpdate(room);
+        } else {
+          checkAndTriggerBotTurn(room);
         }
 
         if (ack) ack({ success: true });
@@ -435,6 +587,8 @@ export function registerSocketHandlers(io: SocketIOServer) {
           io.to(room.code).emit('game:finished', room.game?.winnerResult);
           room.status = 'FINISHED';
           broadcastRoomUpdate(room);
+        } else {
+          checkAndTriggerBotTurn(room);
         }
 
         if (ack) ack({ success: true });
@@ -513,6 +667,8 @@ export function registerSocketHandlers(io: SocketIOServer) {
             io.to(room.code).emit('game:finished', room.game.winnerResult);
             room.status = 'FINISHED';
             broadcastRoomUpdate(room);
+          } else {
+            checkAndTriggerBotTurn(room);
           }
         }
       }

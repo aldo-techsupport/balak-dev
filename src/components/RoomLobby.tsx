@@ -16,7 +16,9 @@ import {
   MessageSquare,
   Send,
   Sparkles,
+  Bot,
 } from 'lucide-react';
+import { getRankInfo } from '@/lib/rank';
 
 const AVATAR_MAP: Record<string, string> = {
   avatar_1: '🦁 Singa Emas',
@@ -52,16 +54,31 @@ export const RoomLobby: React.FC = () => {
     chatMessages,
     error,
     setError,
+    addBot,
   } = useRoomStore();
 
   const [copied, setCopied] = useState(false);
   const [chatInput, setChatInput] = useState('');
+  const [addingBot, setAddingBot] = useState(false);
 
   if (!currentRoom) return null;
 
   const isHost = currentRoom.hostId === user?.id;
   const mySlot = currentRoom.players.find((p) => p.userId === user?.id);
   const isTeamBattle = currentRoom.mode === 'TEAM_BATTLE';
+
+  const handleAddBot = async () => {
+    if (addingBot) return;
+    setAddingBot(true);
+    try {
+      const res = await addBot();
+      if (!res.success && res.error) {
+        setError(res.error);
+      }
+    } finally {
+      setAddingBot(false);
+    }
+  };
 
   const copyCode = () => {
     navigator.clipboard.writeText(currentRoom.code);
@@ -104,9 +121,14 @@ export const RoomLobby: React.FC = () => {
                 {currentRoom.isPublic ? 'Publik' : 'Privat'}
               </span>
             </div>
-            <p className="text-xs text-slate-400 mt-1">
-              Host: <span className="text-amber-400 font-semibold">{currentRoom.players.find(p => p.isHost)?.nickname}</span> •
-              Waktu Giliran: <span className="text-slate-300 font-mono">20 Detik</span>
+            <p className="text-xs text-slate-400 mt-1 flex flex-wrap items-center gap-2">
+              <span>Host: <strong className="text-amber-400">{currentRoom.players.find(p => p.isHost)?.nickname}</strong></span> •
+              <span className="px-2 py-0.5 rounded bg-amber-500/10 text-amber-300 font-bold border border-amber-500/20 font-mono">
+                Ronde #{currentRoom.roundNumber || 1}
+              </span> •
+              <span className="text-emerald-400 font-medium">
+                Start Turn 1: {(!currentRoom.roundNumber || currentRoom.roundNumber === 1 || !currentRoom.lastWinnerUserId) ? 'Pemegang Balak 0 (0-0)' : 'Pemenang Ronde Sebelumnya'}
+              </span>
             </p>
           </div>
 
@@ -174,6 +196,8 @@ export const RoomLobby: React.FC = () => {
                   teamColor="red"
                   isHostUser={isHost}
                   onKick={kickPlayer}
+                  onAddBot={handleAddBot}
+                  addingBot={addingBot}
                 />
 
                 {/* Middle Row: Left (Seat 1 - Team B) & Right (Seat 3 - Team B) */}
@@ -185,6 +209,8 @@ export const RoomLobby: React.FC = () => {
                     teamColor="blue"
                     isHostUser={isHost}
                     onKick={kickPlayer}
+                    onAddBot={handleAddBot}
+                    addingBot={addingBot}
                   />
                   <SeatSlotCard
                     slotIndex={3}
@@ -193,6 +219,8 @@ export const RoomLobby: React.FC = () => {
                     teamColor="blue"
                     isHostUser={isHost}
                     onKick={kickPlayer}
+                    onAddBot={handleAddBot}
+                    addingBot={addingBot}
                   />
                 </div>
 
@@ -204,6 +232,8 @@ export const RoomLobby: React.FC = () => {
                   teamColor="red"
                   isHostUser={isHost}
                   onKick={kickPlayer}
+                  onAddBot={handleAddBot}
+                  addingBot={addingBot}
                 />
               </div>
             </div>
@@ -243,17 +273,40 @@ export const RoomLobby: React.FC = () => {
                                 <span className="font-bold text-white text-sm">
                                   {player.nickname}
                                 </span>
+                                {player.isBot && (
+                                  <span className="px-2 py-0.5 rounded-full text-[9px] font-black bg-rose-500/25 text-rose-300 border border-rose-500/40">
+                                    👑 BOT MYTHIC 100★
+                                  </span>
+                                )}
                                 {player.isHost && (
                                   <span title="Host Meja">
                                     <Crown className="w-4 h-4 text-amber-400" />
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-slate-400">Kursi #{idx + 1}</p>
+                              {(() => {
+                                const pRank = getRankInfo(player.rankTier, player.rankDivision, player.rankStars);
+                                return (
+                                  <div className="flex items-center gap-1.5 mt-0.5">
+                                    <span className="text-xs">{pRank.icon}</span>
+                                    <span className={`text-[10px] font-bold ${pRank.badgeText}`}>
+                                      {pRank.title}
+                                    </span>
+                                    <span className="text-[9px] text-amber-400 font-mono">
+                                      {pRank.starsDisplay}
+                                    </span>
+                                  </div>
+                                );
+                              })()}
+                              <p className="text-[10px] text-slate-400 mt-0.5">Kursi #{idx + 1}</p>
                               <div className="mt-2">
                                 {player.isHost ? (
                                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-amber-500/20 text-amber-300 border border-amber-500/30">
                                     Host Room
+                                  </span>
+                                ) : player.isBot ? (
+                                  <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/30">
+                                    Bot Siap (Ready)
                                   </span>
                                 ) : player.isReady ? (
                                   <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -279,10 +332,21 @@ export const RoomLobby: React.FC = () => {
                           )}
                         </div>
                       ) : (
-                        <div className="text-center py-4">
-                          <Users className="w-6 h-6 mx-auto mb-1 opacity-40" />
-                          <p className="text-xs font-semibold">Kursi Kosong #{idx + 1}</p>
-                          <p className="text-[10px] text-slate-500">Menunggu pemain bergabung...</p>
+                        <div className="text-center py-3">
+                          <Users className="w-5 h-5 mx-auto mb-1 opacity-40 text-slate-400" />
+                          <p className="text-xs font-semibold text-slate-400 mb-2">Kursi Kosong #{idx + 1}</p>
+                          {isHost ? (
+                            <button
+                              onClick={handleAddBot}
+                              disabled={addingBot}
+                              className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-gradient-to-r from-rose-950/70 to-purple-950/70 hover:from-rose-900/90 hover:to-purple-900/90 border border-rose-500/40 text-rose-200 hover:text-white text-xs font-bold transition active:scale-95 shadow"
+                            >
+                              <Bot className="w-3.5 h-3.5 text-rose-400" />
+                              + Tambah Bot (Mythic Glory 100★)
+                            </button>
+                          ) : (
+                            <p className="text-[10px] text-slate-500">Menunggu pemain bergabung...</p>
+                          )}
                         </div>
                       )}
                     </div>
@@ -303,6 +367,17 @@ export const RoomLobby: React.FC = () => {
             </button>
 
             <div className="flex items-center gap-3">
+              {isHost && currentRoom.players.length < currentRoom.maxPlayers && (
+                <button
+                  onClick={handleAddBot}
+                  disabled={addingBot}
+                  className="flex items-center gap-2 px-5 py-2.5 rounded-xl bg-gradient-to-r from-rose-950/80 via-purple-950/80 to-slate-900/80 hover:brightness-125 border border-rose-500/50 text-rose-200 hover:text-white font-bold text-xs transition active:scale-95 shadow-md"
+                >
+                  <Bot className="w-4 h-4 text-rose-400" />
+                  + Tambah Bot (Mythic Glory 100★)
+                </button>
+              )}
+
               {!isHost && (
                 <button
                   onClick={toggleReady}
@@ -392,6 +467,8 @@ function SeatSlotCard({
   teamColor,
   isHostUser,
   onKick,
+  onAddBot,
+  addingBot,
 }: {
   slotIndex: number;
   player?: RoomPlayer;
@@ -399,6 +476,8 @@ function SeatSlotCard({
   teamColor: 'red' | 'blue';
   isHostUser: boolean;
   onKick: (id: string) => void;
+  onAddBot?: () => void;
+  addingBot?: boolean;
 }) {
   const isRed = teamColor === 'red';
 
@@ -429,11 +508,32 @@ function SeatSlotCard({
           <div className="overflow-hidden">
             <div className="flex items-center gap-1">
               <span className="font-bold text-white text-xs truncate">{player.nickname}</span>
+              {player.isBot && (
+                <span className="px-1 py-0.2 rounded bg-rose-500/30 text-rose-200 border border-rose-500/40 font-mono text-[7px] font-black uppercase">
+                  MYTHIC 100★
+                </span>
+              )}
               {player.isHost && <Crown className="w-3.5 h-3.5 text-amber-400 shrink-0" />}
             </div>
+            {(() => {
+              const pRank = getRankInfo(player.rankTier, player.rankDivision, player.rankStars);
+              return (
+                <div className="flex items-center gap-1 mt-0.5">
+                  <span className="text-[10px]">{pRank.icon}</span>
+                  <span className={`text-[9px] font-bold ${pRank.badgeText} truncate`}>
+                    {pRank.title}
+                  </span>
+                  <span className="text-[8px] text-amber-300 font-mono">
+                    {pRank.starsDisplay}
+                  </span>
+                </div>
+              );
+            })()}
             <div className="mt-0.5">
               {player.isHost ? (
                 <span className="text-[9px] text-amber-400 font-semibold">Host</span>
+              ) : player.isBot ? (
+                <span className="text-[9px] text-purple-300 font-bold">Bot Siap</span>
               ) : player.isReady ? (
                 <span className="text-[9px] text-emerald-400 font-bold">Siap</span>
               ) : (
@@ -453,8 +553,19 @@ function SeatSlotCard({
           )}
         </div>
       ) : (
-        <div className="text-center py-2">
-          <span className="text-xs text-slate-500">Kursi Kosong</span>
+        <div className="text-center py-1">
+          {isHostUser && onAddBot ? (
+            <button
+              onClick={onAddBot}
+              disabled={addingBot}
+              className="w-full py-1.5 px-2 rounded-xl bg-gradient-to-r from-rose-950/70 to-purple-950/70 hover:from-rose-900/90 hover:to-purple-900/90 border border-rose-500/40 text-rose-200 hover:text-white text-[10px] font-bold flex items-center justify-center gap-1 transition active:scale-95 shadow-sm"
+            >
+              <Bot className="w-3 h-3 text-rose-400" />
+              + Bot Mythic 100★
+            </button>
+          ) : (
+            <span className="text-xs text-slate-500">Kursi Kosong</span>
+          )}
         </div>
       )}
     </div>

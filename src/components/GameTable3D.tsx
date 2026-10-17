@@ -19,8 +19,24 @@ import {
   LogOut,
   Sparkles,
   ArrowUpDown,
+  Swords,
+  Shield,
+  Crown,
+  Check,
 } from 'lucide-react';
 import { sound } from '@/lib/audio';
+import { getRankInfo } from '@/lib/rank';
+
+const AVATAR_ICONS: Record<string, string> = {
+  avatar_1: '🦁',
+  avatar_2: '🐯',
+  avatar_3: '🦅',
+  avatar_4: '🐲',
+  avatar_5: '🐼',
+  avatar_6: '🐺',
+  avatar_7: '🦊',
+  avatar_8: '👑',
+};
 
 // Presets for quick chat
 const QUICK_EMOTES = ['🤣', '🔥', '👏', '🏆', '😱', '🎲'];
@@ -87,6 +103,8 @@ interface ChainTransform {
   rotY: number;
 }
 
+type ChainDir = 'RIGHT' | 'DOWN' | 'LEFT';
+
 function calculateDominoChainTransforms(
   board: BoardPlacedTile[],
   tileWidth: number = 1.4,
@@ -95,43 +113,129 @@ function calculateDominoChainTransforms(
 ): ChainTransform[] {
   if (board.length === 0) return [];
 
-  const MAX_SPAN_X = 10.0; // Comfortable horizontal span before snake curve
-  const ROW_STEP_Z = tileLength + 0.35; // Row step for turns
-
+  // Comfortable horizontal span for domino row (~4 tiles across)
+  const MAX_SPAN_X = 6.0;
   const transforms: ChainTransform[] = [];
-  let currX = 0;
-  let currZ = 0;
-  let dirX: 1 | -1 = 1;
+
+  let dir: ChainDir = 'RIGHT';
+  let anchorX = 0;
+  let anchorZ = 0;
+  let prevIsDouble = false;
+  let tilesInDir = 0;
 
   for (let i = 0; i < board.length; i++) {
     const placed = board[i];
     const isDouble = placed.isDouble;
-    const halfDimAlongX = isDouble ? tileWidth / 2 : tileLength / 2;
 
-    // Check if adding this tile exceeds horizontal boundary
-    const projectedFront = currX + dirX * (halfDimAlongX * 2);
-    if ((dirX === 1 && projectedFront > MAX_SPAN_X) || (dirX === -1 && projectedFront < -MAX_SPAN_X)) {
-      currZ += ROW_STEP_Z;
-      dirX = (dirX === 1 ? -1 : 1) as 1 | -1;
+    // First tile (center tile): place at (0, 0)
+    if (i === 0) {
+      if (isDouble) {
+        // Balak starts crosswise (vertical on screen)
+        transforms.push({ x: 0, z: 0, rotY: 0 });
+        anchorX = tileWidth / 2;
+        anchorZ = 0;
+      } else {
+        // Normal tile starts horizontal (along +X)
+        transforms.push({ x: 0, z: 0, rotY: Math.PI / 2 });
+        anchorX = tileLength / 2;
+        anchorZ = 0;
+      }
+      prevIsDouble = isDouble;
+      tilesInDir = 1;
+      continue;
     }
 
-    const posX = currX + dirX * halfDimAlongX;
-    const posZ = currZ;
+    const testLen = isDouble ? tileWidth : tileLength;
+    let shouldTurn = false;
+    if (dir === 'RIGHT' && anchorX + testLen > MAX_SPAN_X) shouldTurn = true;
+    else if (dir === 'LEFT' && anchorX - testLen < -MAX_SPAN_X) shouldTurn = true;
+    else if (dir === 'DOWN' && tilesInDir >= 2) shouldTurn = true;
 
+    // Authentic L-shaped corner turn logic
+    if (shouldTurn) {
+      const oldDir: ChainDir = dir;
+      if (oldDir === 'RIGHT') {
+        dir = 'DOWN';
+        // Connect directly under the right half of the previous tile
+        anchorX = anchorX - tileWidth / 2;
+        anchorZ = anchorZ + (prevIsDouble ? tileLength / 2 : tileWidth / 2);
+      } else if (oldDir === 'LEFT') {
+        dir = 'DOWN';
+        // Connect directly under the left half of the previous tile
+        anchorX = anchorX + tileWidth / 2;
+        anchorZ = anchorZ + (prevIsDouble ? tileLength / 2 : tileWidth / 2);
+      } else if (oldDir === 'DOWN') {
+        const turnLeft = anchorX > 0;
+        dir = turnLeft ? 'LEFT' : 'RIGHT';
+        // Connect directly to the left/right edge of the bottom half of the previous tile
+        anchorZ = anchorZ - tileWidth / 2;
+        anchorX = turnLeft
+          ? anchorX - (prevIsDouble ? tileLength / 2 : tileWidth / 2)
+          : anchorX + (prevIsDouble ? tileLength / 2 : tileWidth / 2);
+      }
+      tilesInDir = 0;
+    }
+
+    let posX = 0;
+    let posZ = 0;
     let rotY = 0;
-    if (!isDouble) {
-      rotY = dirX === 1 ? Math.PI / 2 : -Math.PI / 2;
-    } else {
-      rotY = 0;
+
+    if (dir === 'RIGHT') {
+      if (isDouble) {
+        // Balak crosswise: vertical (rotY = 0)
+        posX = anchorX + gap + tileWidth / 2;
+        posZ = anchorZ;
+        rotY = 0;
+        anchorX = posX + tileWidth / 2;
+        anchorZ = posZ;
+      } else {
+        // Normal horizontal: rotY = Math.PI / 2
+        posX = anchorX + gap + tileLength / 2;
+        posZ = anchorZ;
+        rotY = Math.PI / 2;
+        anchorX = posX + tileLength / 2;
+        anchorZ = posZ;
+      }
+    } else if (dir === 'LEFT') {
+      if (isDouble) {
+        // Balak crosswise: vertical (rotY = 0)
+        posX = anchorX - gap - tileWidth / 2;
+        posZ = anchorZ;
+        rotY = 0;
+        anchorX = posX - tileWidth / 2;
+        anchorZ = posZ;
+      } else {
+        // Normal horizontal: rotY = -Math.PI / 2
+        posX = anchorX - gap - tileLength / 2;
+        posZ = anchorZ;
+        rotY = -Math.PI / 2;
+        anchorX = posX - tileLength / 2;
+        anchorZ = posZ;
+      }
+    } else if (dir === 'DOWN') {
+      if (isDouble) {
+        // Balak crosswise: horizontal (rotY = Math.PI / 2)
+        posX = anchorX;
+        posZ = anchorZ + gap + tileWidth / 2;
+        rotY = Math.PI / 2;
+        anchorX = posX;
+        anchorZ = posZ + tileWidth / 2;
+      } else {
+        // Normal vertical: rotY = 0
+        posX = anchorX;
+        posZ = anchorZ + gap + tileLength / 2;
+        rotY = 0;
+        anchorX = posX;
+        anchorZ = posZ + tileLength / 2;
+      }
     }
 
     transforms.push({ x: posX, z: posZ, rotY });
-
-    // Advance currX for next tile
-    currX = posX + dirX * (halfDimAlongX + gap);
+    prevIsDouble = isDouble;
+    tilesInDir++;
   }
 
-  // Auto-center the entire chain at (0, 0) on the table
+  // Auto-center entire chain at (0, 0) on the table
   let minX = Infinity, maxX = -Infinity;
   let minZ = Infinity, maxZ = -Infinity;
 
@@ -155,7 +259,7 @@ function calculateDominoChainTransforms(
 export const GameTable3D: React.FC = () => {
   const mountRef = useRef<HTMLDivElement>(null);
   const { user } = useAuthStore();
-  const { currentRoom, sendChat, chatMessages, leaveRoom } = useRoomStore();
+  const { currentRoom, sendChat, chatMessages, leaveRoom, playAgain } = useRoomStore();
   const {
     gameState,
     selectedTileId,
@@ -642,33 +746,58 @@ export const GameTable3D: React.FC = () => {
 
       {/* OPPONENTS STATUS (Top of Table) */}
       <div className="relative z-10 flex justify-center gap-3 px-2 pointer-events-none">
-        {opponents.map((opp, idx) => (
-          <div
-            key={opp.userId}
-            className={`flex items-center gap-2 px-3 py-1 rounded-xl backdrop-blur-md border text-xs ${
-              gameState.currentTurnUserId === opp.userId
-                ? 'bg-amber-950/80 border-amber-400 ring-2 ring-amber-400/50 text-amber-200 shadow-lg'
-                : 'bg-slate-900/80 border-slate-800 text-slate-300'
-            }`}
-          >
-            <span className="text-base">{idx === 0 ? '🦁' : idx === 1 ? '🐯' : '🦅'}</span>
-            <div>
-              <span className="font-bold block truncate max-w-[90px]">{opp.nickname}</span>
-              <span className="text-[10px] text-slate-400 block">
-                {gameState.opponentTileCounts[opp.userId] ?? 0} kartu
-              </span>
+        {opponents.map((opp, idx) => {
+          const oppRank = getRankInfo(opp.rankTier, opp.rankDivision, opp.rankStars);
+          const isOppRed = opp.team === 'TEAM_A';
+          const isOppBlue = opp.team === 'TEAM_B';
+          return (
+            <div
+              key={opp.userId}
+              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl backdrop-blur-md border text-xs shadow-md transition ${
+                gameState.currentTurnUserId === opp.userId
+                  ? 'bg-amber-950/80 border-amber-400 ring-2 ring-amber-400/50 text-amber-200'
+                  : currentRoom?.mode === 'TEAM_BATTLE'
+                  ? isOppRed
+                    ? 'bg-red-950/80 border-red-700/60 text-red-200'
+                    : 'bg-blue-950/80 border-blue-700/60 text-blue-200'
+                  : 'bg-slate-900/80 border-slate-800 text-slate-300'
+              }`}
+            >
+              <span className="text-xl">{opp.avatar ? AVATAR_ICONS[opp.avatar] : (idx === 0 ? '🦁' : idx === 1 ? '🐯' : '🦅')}</span>
+              <div>
+                <div className="flex items-center gap-1.5">
+                  <span className="font-bold block truncate max-w-[85px] text-white">{opp.nickname}</span>
+                  {opp.isBot && (
+                    <span className="text-[7px] px-1 py-0.2 rounded bg-rose-500/40 text-rose-200 border border-rose-500/50 font-black">
+                      MYTHIC 100★
+                    </span>
+                  )}
+                  {currentRoom?.mode === 'TEAM_BATTLE' && (
+                    <span className={`text-[8px] px-1.5 py-0.2 rounded font-black ${isOppRed ? 'bg-red-600/40 text-red-300' : 'bg-blue-600/40 text-blue-300'}`}>
+                      {isOppRed ? 'MERAH' : 'BIRU'}
+                    </span>
+                  )}
+                </div>
+                <div className="flex items-center gap-1 text-[9px] mt-0.5">
+                  <span title={oppRank.title}>{oppRank.icon}</span>
+                  <span className="font-mono text-amber-300 font-bold">{oppRank.starsDisplay}</span>
+                  <span className="text-slate-400">• {gameState.opponentTileCounts[opp.userId] ?? 0} kartu</span>
+                </div>
+              </div>
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
 
       {/* CENTER NOTICE (If board empty at start) */}
       {gameState.board.length === 0 && (
         <div className="absolute top-28 left-1/2 -translate-x-1/2 z-10 pointer-events-none text-center px-4 w-full max-w-md">
-          <div className="bg-slate-900/90 backdrop-blur-md px-4 py-2 rounded-2xl border border-amber-500/50 shadow-xl">
+          <div className="bg-slate-900/95 backdrop-blur-md px-4 py-2.5 rounded-2xl border border-amber-500/50 shadow-2xl">
             <p className="text-amber-300 font-bold text-xs sm:text-sm flex items-center justify-center gap-1.5">
-              <Sparkles className="w-4 h-4" />
-              Meja Terbuka! Pasang kartu pertama Anda.
+              <Sparkles className="w-4 h-4 text-amber-400" />
+              {(!currentRoom?.roundNumber || currentRoom?.roundNumber === 1 || !currentRoom?.lastWinnerUserId)
+                ? 'Ronde 1: Meja Dibuka dengan Balak 0 (0-0) oleh pemegang balak 0!'
+                : `Ronde #${currentRoom?.roundNumber}: Meja Dibuka oleh Pemenang Ronde Sebelumnya dengan Balak miliknya!`}
             </p>
           </div>
         </div>
@@ -836,31 +965,190 @@ export const GameTable3D: React.FC = () => {
         </div>
       )}
 
-      {/* GAME OVER MODAL */}
-      {gameState.isFinished && gameState.winnerResult && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/85 backdrop-blur-md p-4 animate-fade-in">
-          <div className="bg-gradient-to-b from-slate-900 to-slate-950 border border-amber-500/40 rounded-3xl max-w-sm w-full p-5 shadow-2xl text-center">
-            <div className="w-12 h-12 mx-auto rounded-full bg-gradient-to-tr from-amber-500 to-yellow-300 flex items-center justify-center text-slate-950 shadow-lg mb-2">
-              <Trophy className="w-6 h-6" />
+      {/* GAME OVER MODAL — RANK STYLE */}
+      {gameState.isFinished && gameState.winnerResult && (() => {
+        const result = gameState.winnerResult;
+        const isTeamBattle = currentRoom?.mode === 'TEAM_BATTLE';
+        const mySummary = result.pipsSummary?.find((p) => p.userId === user?.id);
+        const amIWinner = mySummary?.isWinner ?? false;
+        const myRank = getRankInfo(
+          mySummary?.rankTier || user?.rankTier,
+          mySummary?.rankDivision || user?.rankDivision,
+          mySummary?.rankStars ?? user?.rankStars
+        );
+        const winningTeam = result.winningTeam;
+        const isTeamA = winningTeam === 'TEAM_A';
+
+        return (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/90 backdrop-blur-md p-4 animate-fade-in overflow-y-auto">
+            <div className="bg-gradient-to-b from-slate-900 via-slate-950 to-black border-2 border-amber-500/50 rounded-3xl max-w-md w-full p-6 shadow-[0_0_50px_rgba(245,158,11,0.25)] text-center relative overflow-hidden">
+              {/* Header Badge */}
+              <div className="mb-4">
+                <div
+                  className={`inline-block px-6 py-1.5 rounded-full text-base font-black tracking-widest uppercase shadow-lg ${
+                    amIWinner
+                      ? 'bg-gradient-to-r from-amber-400 via-yellow-300 to-amber-500 text-slate-950 shadow-amber-500/40 animate-pulse'
+                      : 'bg-gradient-to-r from-red-600 to-rose-700 text-white shadow-red-500/30'
+                  }`}
+                >
+                  {amIWinner ? '🏆 VICTORY (MENANG)!' : '💀 DEFEAT (KALAH)'}
+                </div>
+                <h2 className="text-xl font-black text-white mt-2">
+                  {result.endReason === 'NORMAL_WIN' ? 'GAPLE SELESAI!' : 'BUNTU (DEADLOCK)!'}
+                </h2>
+
+                {/* Team / Solo Winner Title */}
+                {isTeamBattle ? (
+                  <div className="mt-2">
+                    <span
+                      className={`inline-block px-3 py-1 rounded-xl text-xs font-black uppercase tracking-wider ${
+                        isTeamA
+                          ? 'bg-red-600 text-white shadow-[0_0_15px_rgba(239,68,68,0.5)]'
+                          : 'bg-blue-600 text-white shadow-[0_0_15px_rgba(59,130,246,0.5)]'
+                      }`}
+                    >
+                      {isTeamA ? '🛡️ TIM MERAH (TIM A) MENANG!' : '⚔️ TIM BIRU (TIM B) MENANG!'}
+                    </span>
+                    {result.teamScores && (
+                      <p className="text-[11px] text-slate-400 font-mono mt-1">
+                        Skor Balak: <span className="text-red-400 font-bold">Tim Merah {result.teamScores.teamA}</span> vs{' '}
+                        <span className="text-blue-400 font-bold">Tim Biru {result.teamScores.teamB}</span>
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-emerald-400 font-bold text-sm mt-1">
+                    Juara: {result.winnerNickname}
+                  </p>
+                )}
+              </div>
+
+              {/* Rank Status Card */}
+              <div
+                className={`p-4 rounded-2xl border ${myRank.badgeBg} ${myRank.badgeBorder} my-4 shadow-inner text-left relative overflow-hidden`}
+              >
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-3">
+                    <span className="text-3xl">{myRank.icon}</span>
+                    <div>
+                      <span className="text-[10px] text-slate-400 uppercase font-semibold block">
+                        Rank Anda
+                      </span>
+                      <span className={`text-base font-black tracking-tight ${myRank.badgeText}`}>
+                        {myRank.title}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Star Change Pill */}
+                  <div>
+                    {mySummary?.starChange && mySummary.starChange > 0 ? (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-black bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        +1 Bintang ⭐
+                      </span>
+                    ) : mySummary?.starChange && mySummary.starChange < 0 ? (
+                      <span className="px-2.5 py-1 rounded-full text-xs font-black bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                        -1 Bintang 💔
+                      </span>
+                    ) : (
+                      <span className="px-2.5 py-1 rounded-full text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                        0 Bintang
+                      </span>
+                    )}
+                  </div>
+                </div>
+
+                <div className="mt-2.5 pt-2 border-t border-slate-800 flex items-center justify-between">
+                  <span className="text-xs text-slate-300 font-medium">Bintang Saat Ini:</span>
+                  <span className="text-sm font-mono tracking-widest text-amber-300 font-bold">
+                    {myRank.starsDisplay}
+                  </span>
+                </div>
+              </div>
+
+              {/* Match Participants & Balak Summary */}
+              <div className="my-3 space-y-1.5 text-left max-h-44 overflow-y-auto pr-1">
+                <span className="text-[10px] uppercase font-bold text-slate-500 tracking-wider block">
+                  Detail Pemain & Sisa Balak:
+                </span>
+                {result.pipsSummary?.map((p) => {
+                  const isRed = p.team === 'TEAM_A';
+                  return (
+                    <div
+                      key={p.userId}
+                      className={`flex items-center justify-between p-2 rounded-xl text-xs border ${
+                        p.isWinner
+                          ? 'bg-amber-950/40 border-amber-500/40 text-amber-200'
+                          : 'bg-slate-950/60 border-slate-800 text-slate-400'
+                      }`}
+                    >
+                      <div className="flex items-center gap-2 truncate">
+                        <span className="text-base">{AVATAR_ICONS[p.avatar] || '🦁'}</span>
+                        <div className="truncate">
+                          <div className="flex items-center gap-1.5">
+                            <span className="font-bold text-white truncate max-w-[110px]">
+                              {p.nickname}
+                            </span>
+                            {p.isBot && (
+                              <span className="text-[7px] px-1 py-0.2 rounded bg-rose-500/40 text-rose-200 border border-rose-500/50 font-black">
+                                MYTHIC 100★
+                              </span>
+                            )}
+                            {isTeamBattle && (
+                              <span
+                                className={`text-[8px] px-1 py-0.2 rounded font-black ${
+                                  isRed
+                                    ? 'bg-red-500/30 text-red-300'
+                                    : 'bg-blue-500/30 text-blue-300'
+                                }`}
+                              >
+                                {isRed ? 'MERAH' : 'BIRU'}
+                              </span>
+                            )}
+                          </div>
+                          <span className="text-[10px] text-slate-400">
+                            {p.rankFormatted || 'Warrior III'}
+                          </span>
+                        </div>
+                      </div>
+
+                      <div className="text-right shrink-0">
+                        <span className="font-mono font-bold text-slate-200 block text-xs">
+                          {p.pips} Balak
+                        </span>
+                        <span className="text-[9px] text-slate-500">
+                          {p.tiles?.length ?? 0} kartu
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+
+              {/* Action Buttons: Stay in Room vs Exit */}
+              <div className="mt-5 space-y-2">
+                <button
+                  onClick={async () => {
+                    await playAgain();
+                  }}
+                  className="w-full py-3 px-4 rounded-2xl bg-gradient-to-r from-emerald-500 to-teal-400 hover:from-emerald-400 hover:to-teal-300 text-slate-950 font-black text-sm shadow-xl flex items-center justify-center gap-2 transition transform active:scale-95"
+                >
+                  <RotateCcw className="w-4 h-4" />
+                  Lanjut Ronde Berikutnya (Stay di Room)
+                </button>
+
+                <button
+                  onClick={leaveRoom}
+                  className="w-full py-2.5 px-4 rounded-2xl bg-slate-900 hover:bg-slate-800 border border-slate-800 text-slate-400 hover:text-white font-bold text-xs flex items-center justify-center gap-1.5 transition"
+                >
+                  <LogOut className="w-3.5 h-3.5" />
+                  Keluar ke Lobby Utama
+                </button>
+              </div>
             </div>
-
-            <h2 className="text-xl font-black text-amber-300">
-              {gameState.winnerResult.endReason === 'NORMAL_WIN' ? 'GAPLE SELESAI!' : 'BUNTU (DEADLOCK)!'}
-            </h2>
-
-            <p className="text-emerald-400 font-bold text-xs mt-1">
-              Pemenang: {gameState.winnerResult.winnerNickname}
-            </p>
-
-            <button
-              onClick={leaveRoom}
-              className="mt-5 px-5 py-2 rounded-xl bg-emerald-600 hover:bg-emerald-500 text-slate-950 font-bold text-xs transition shadow-lg"
-            >
-              Kembali ke Lobby
-            </button>
           </div>
-        </div>
-      )}
+        );
+      })()}
         </>
       )}
     </div>

@@ -39,12 +39,20 @@ export async function POST(req: NextRequest) {
       return NextResponse.json({ error: 'Username/Email atau password salah.' }, { status: 401 });
     }
 
+    if (user.isBanned) {
+      return NextResponse.json(
+        { error: 'Akun ini telah dinonaktifkan oleh administrator.' },
+        { status: 403 }
+      );
+    }
+
     // Sign session token
     const token = signToken({
       userId: user.id,
       username: user.username,
       nickname: user.nickname,
       avatar: user.avatar,
+      role: user.role,
     });
 
     const res = NextResponse.json({
@@ -57,6 +65,8 @@ export async function POST(req: NextRequest) {
         email: user.email,
         nickname: user.nickname,
         avatar: user.avatar,
+        role: user.role,
+        isBanned: user.isBanned,
         totalGames: user.totalGames,
         wins: user.wins,
         losses: user.losses,
@@ -64,6 +74,10 @@ export async function POST(req: NextRequest) {
         soloWins: user.soloWins,
         teamGames: user.teamGames,
         teamWins: user.teamWins,
+        rankTier: user.rankTier,
+        rankDivision: user.rankDivision,
+        rankStars: user.rankStars,
+        rankScore: user.rankScore,
       },
     });
 

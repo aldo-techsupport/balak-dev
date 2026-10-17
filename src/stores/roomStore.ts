@@ -11,6 +11,10 @@ export interface RoomPlayer {
   avatar: string;
   seatIndex: number;
   team: 'TEAM_A' | 'TEAM_B' | null;
+  rankTier?: string;
+  rankDivision?: string;
+  rankStars?: number;
+  isBot?: boolean;
   isReady: boolean;
   isConnected: boolean;
   isHost: boolean;
@@ -24,6 +28,9 @@ export interface ClientRoom {
   maxPlayers: number;
   hostId: string;
   status: 'WAITING' | 'PLAYING' | 'FINISHED';
+  roundNumber?: number;
+  lastWinnerUserId?: string;
+  lastWinnerTeam?: 'TEAM_A' | 'TEAM_B' | null;
   players: RoomPlayer[];
 }
 
@@ -64,6 +71,8 @@ interface RoomState {
   startGame: () => void;
   kickPlayer: (targetUserId: string) => void;
   sendChat: (text: string, isEmote?: boolean) => void;
+  addBot: () => Promise<{ success: boolean; error?: string }>;
+  playAgain: () => Promise<{ success: boolean; error?: string }>;
   initSocketListeners: () => void;
 }
 
@@ -108,6 +117,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     socket.off('chat:message');
     socket.off('player:disconnected');
     socket.off('player:reconnected');
+    socket.off('room:reset');
 
     socket.on('connect', () => {
       get().syncState();
@@ -115,6 +125,18 @@ export const useRoomStore = create<RoomState>((set, get) => ({
 
     socket.on('room:updated', (updatedRoom: ClientRoom) => {
       set({ currentRoom: updatedRoom, isCreating: false, isJoining: false, error: null });
+    });
+
+    socket.on('room:reset', () => {
+      sound.playTileClick();
+      useGameStore.getState().resetGame();
+      useAuthStore.getState().checkAuth();
+      set((state) =>
+        state.currentRoom
+          ? { currentRoom: { ...state.currentRoom, status: 'WAITING' } }
+          : {}
+      );
+      get().syncState();
     });
 
     socket.on('room:player-joined', () => {
@@ -293,5 +315,55 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       const socket = getSocket();
       socket.emit('chat:send', { roomCode: room.code, text, isEmote });
     }
+  },
+
+  addBot: async () => {
+    const room = get().currentRoom;
+    if (!room) return { success: false, error: 'Tidak ada room aktif.' };
+
+    const socket = getSocket();
+    return new Promise((resolve) => {
+      socket.emit('room:add-bot', { roomCode: room.code }, (res: any) => {
+        if (res && res.success) {
+          resolve({ success: true });
+        } else {
+          const err = res?.error || 'Gagal menambahkan bot ke meja.';
+          set({ error: err });
+          resolve({ success: false, error: err });
+        }
+      });
+    });
+  },
+
+  playAgain: async () => {
+    const room = get().currentRoom;
+    if (!room) return { success: false, error: 'Tidak ada room aktif.' };
+
+    const socket = getSocket();
+    return new Promise((resolve) => {
+      socket.emit('room:play-again', { roomCode: room.code }, (res: any) => {
+        if (res && res.success) {
+          useGameStore.getState().resetGame();
+          useAuthStore.getState().checkAuth();
+          set((state) =>
+            state.currentRoom
+              ? {
+                  currentRoom: {
+                    ...state.currentRoom,
+                    status: 'WAITING',
+                    roundNumber: res.roundNumber,
+                  },
+                }
+              : {}
+          );
+          resolve({ success: true });
+        } else {
+          resolve({
+            success: false,
+            error: res?.error || 'Gagal mereset room untuk ronde berikutnya.',
+          });
+        }
+      });
+    });
   },
 }));

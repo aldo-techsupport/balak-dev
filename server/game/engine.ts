@@ -472,6 +472,16 @@ export class GameEngine {
       teamScores,
     };
 
+    // Update in-memory player win count for this table session
+    for (const p of pipsSummary) {
+      if (p.isWinner) {
+        const rp = room.players.find((pl) => pl.userId === p.userId);
+        if (rp) {
+          rp.wins = (rp.wins || 0) + 1;
+        }
+      }
+    }
+
     // Save to PostgreSQL via Prisma
     try {
       await prisma.$transaction(async (tx) => {

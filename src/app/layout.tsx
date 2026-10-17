@@ -3,9 +3,9 @@ import './globals.css';
 import { Navbar } from '@/components/Navbar';
 
 export const metadata: Metadata = {
-  title: 'BALAK 3D — Game Gaple Real-Time Multiplayer Online',
+  title: 'BALAK 3D — Game Gaple Domino Online',
   description:
-    'Game Gaple Domino 3D Real-Time Online Multiplayer. Dilengkapi sistem room, mode Solo & Team Battle 2 vs 2, serta sistem rank kompetitif.',
+    'Game Gaple Domino Balak 3D Online. Mode Solo dan Team Battle 2 vs 2 dengan meja turnamen 3D, fitur voice ON MIC, dan sistem rank kompetitif.',
 };
 
 export default function RootLayout({
@@ -15,7 +15,13 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="id">
-      <body className="bg-[#070b12] text-slate-100 min-h-screen flex flex-col antialiased selection:bg-amber-500 selection:text-black">
+      <head>
+        <meta
+          name="viewport"
+          content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+        />
+      </head>
+      <body className="bg-[#070b12] text-slate-100 min-h-screen flex flex-col antialiased selection:bg-amber-500 selection:text-black overflow-x-hidden">
         <Navbar />
         <main className="flex-1 flex flex-col">{children}</main>
       </body>

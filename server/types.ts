@@ -27,6 +27,7 @@ export interface PlayerSlot {
   rankTier?: string;
   rankDivision?: string;
   rankStars?: number;
+  wins?: number;
   isBot?: boolean;
   isReady: boolean;
   isConnected: boolean;

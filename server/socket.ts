@@ -20,6 +20,38 @@ interface AuthenticatedSocket extends Socket {
 }
 
 export function registerSocketHandlers(io: SocketIOServer) {
+  // Voice active peers tracking: roomCode -> Map of socketId => { userId, nickname }
+  const voiceRooms = new Map<string, Map<string, { userId: string; nickname: string }>>();
+
+  function cleanupUserVoice(socketId: string, userId: string, targetRoomCode?: string) {
+    if (targetRoomCode) {
+      const members = voiceRooms.get(targetRoomCode);
+      if (members && members.has(socketId)) {
+        members.delete(socketId);
+        io.to(targetRoomCode).emit('voice:peer-left', {
+          socketId,
+          userId,
+        });
+        if (members.size === 0) {
+          voiceRooms.delete(targetRoomCode);
+        }
+      }
+    } else {
+      voiceRooms.forEach((members, rCode) => {
+        if (members.has(socketId)) {
+          members.delete(socketId);
+          io.to(rCode).emit('voice:peer-left', {
+            socketId,
+            userId,
+          });
+          if (members.size === 0) {
+            voiceRooms.delete(rCode);
+          }
+        }
+      });
+    }
+  }
+
   // Authentication middleware
   io.use(async (socket: AuthenticatedSocket, next) => {
     try {
@@ -476,6 +508,16 @@ export function registerSocketHandlers(io: SocketIOServer) {
           return;
         }
 
+        // Clean up target user voice and remove from socket room
+        for (const s of io.sockets.sockets.values()) {
+          if ((s as any).user?.id === targetUserId) {
+            cleanupUserVoice(s.id, targetUserId, roomCode);
+            s.leave(roomCode);
+            s.emit('room:kicked', { roomCode });
+            break;
+          }
+        }
+
         const room = kickResult.room;
         io.to(room.code).emit('room:player-left', { userId: targetUserId, reason: 'KICKED' });
         broadcastRoomUpdate(room);
@@ -491,6 +533,7 @@ export function registerSocketHandlers(io: SocketIOServer) {
     socket.on('room:leave', (payload: any, ack?: (res: any) => void) => {
       try {
         const { roomCode } = payload || {};
+        cleanupUserVoice(socket.id, user.id, roomCode);
         const leaveResult = roomManager.leaveRoom(roomCode, user.id);
         socket.leave(roomCode);
 
@@ -638,9 +681,143 @@ export function registerSocketHandlers(io: SocketIOServer) {
       }
     });
 
+    // --- EVENT: mic:toggle (ON MIC / MUTE) ---
+    socket.on('mic:toggle', (payload: any) => {
+      try {
+        const { roomCode, isMuted } = payload || {};
+        if (!roomCode) return;
+        io.to(roomCode).emit('mic:status-updated', {
+          userId: user.id,
+          isMuted: Boolean(isMuted),
+        });
+      } catch (err: any) {
+        console.error('[mic:toggle] Error:', err);
+      }
+    });
+
+    // --- EVENT: mic:speaking (Active Voice Detection / Blinking) ---
+    socket.on('mic:speaking', (payload: any) => {
+      try {
+        const { roomCode, speaking } = payload || {};
+        if (!roomCode) return;
+        io.to(roomCode).emit('mic:speaking-updated', {
+          userId: user.id,
+          speaking: Boolean(speaking),
+        });
+      } catch (err: any) {
+        console.error('[mic:speaking] Error:', err);
+      }
+    });
+
+    // --- EVENT: friend:invite ---
+    socket.on('friend:invite', (payload: any) => {
+      try {
+        const { targetUserId, roomCode } = payload || {};
+        if (!targetUserId || !roomCode) return;
+        io.emit(`friend:invite:${targetUserId}`, {
+          fromUserId: user.id,
+          fromNickname: user.nickname,
+          fromAvatar: user.avatar,
+          roomCode,
+          timestamp: Date.now(),
+        });
+      } catch (err: any) {
+        console.error('[friend:invite] Error:', err);
+      }
+    });
+
+    // --- EVENT: voice:join (Real-time WebRTC Voice Mesh) ---
+    socket.on('voice:join', (payload: any) => {
+      try {
+        const { roomCode } = payload || {};
+        if (!roomCode) return;
+
+        console.log(`[Voice Server] ${user.nickname} (${socket.id}) JOINED voice room: ${roomCode}`);
+
+        // Clean up from any previous room first!
+        cleanupUserVoice(socket.id, user.id);
+
+        socket.join(roomCode);
+
+        if (!voiceRooms.has(roomCode)) {
+          voiceRooms.set(roomCode, new Map());
+        }
+        const members = voiceRooms.get(roomCode)!;
+
+        // Send existing voice peers to this client
+        const existingPeers: Array<{ socketId: string; userId: string; nickname: string }> = [];
+        members.forEach((peerUser, peerSocketId) => {
+          if (peerSocketId !== socket.id) {
+            existingPeers.push({
+              socketId: peerSocketId,
+              userId: peerUser.userId,
+              nickname: peerUser.nickname,
+            });
+          }
+        });
+
+        socket.emit('voice:peers', { peers: existingPeers });
+
+        // Broadcast to other peers in room
+        socket.to(roomCode).emit('voice:peer-joined', {
+          socketId: socket.id,
+          userId: user.id,
+          nickname: user.nickname,
+        });
+
+        members.set(socket.id, { userId: user.id, nickname: user.nickname });
+      } catch (err: any) {
+        console.error('[voice:join] Error:', err);
+      }
+    });
+
+    // --- EVENT: voice:signal (WebRTC SDP Offer/Answer/ICE) ---
+    socket.on('voice:signal', (payload: any) => {
+      try {
+        const { targetSocketId, signal } = payload || {};
+        if (!targetSocketId || !signal) return;
+        io.to(targetSocketId).emit('voice:signal', {
+          fromSocketId: socket.id,
+          fromUserId: user.id,
+          fromNickname: user.nickname,
+          signal,
+        });
+      } catch (err: any) {
+        console.error('[voice:signal] Error:', err);
+      }
+    });
+
+    // --- EVENT: voice:stream (Live WebSocket Binary Audio Relay) ---
+    socket.on('voice:stream', (payload: any) => {
+      try {
+        const { roomCode, buffer } = payload || {};
+        if (!roomCode || !buffer) return;
+        socket.to(roomCode).emit('voice:stream', {
+          fromUserId: user.id,
+          fromNickname: user.nickname,
+          buffer,
+        });
+      } catch (err: any) {
+        console.error('[voice:stream] Error:', err);
+      }
+    });
+
+    // --- EVENT: voice:leave ---
+    socket.on('voice:leave', (payload: any) => {
+      try {
+        const { roomCode } = payload || {};
+        cleanupUserVoice(socket.id, user.id, roomCode);
+      } catch (err: any) {
+        console.error('[voice:leave] Error:', err);
+      }
+    });
+
     // --- EVENT: disconnect ---
     socket.on('disconnect', () => {
       console.log(`[Socket Disconnected] User ${user.nickname} (${user.id})`);
+
+      // Clean up voice rooms
+      cleanupUserVoice(socket.id, user.id);
       const { room } = roomManager.handleDisconnect(socket.id);
       if (room) {
         io.to(room.code).emit('player:disconnected', {

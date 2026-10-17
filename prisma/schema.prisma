@@ -33,6 +33,8 @@ model User {
   updatedAt           DateTime           @updatedAt
 
   matchParticipants   MatchParticipant[]
+  friends             Friend[]           @relation("UserFriends")
+  friendOf            Friend[]           @relation("FriendOfUser")
 
   @@index([username])
   @@index([email])
@@ -72,4 +74,18 @@ model MatchParticipant {
 
   @@index([matchId])
   @@index([userId])
+}
+
+model Friend {
+  id        String   @id @default(uuid())
+  userId    String
+  friendId  String
+  createdAt DateTime @default(now())
+
+  user      User     @relation("UserFriends", fields: [userId], references: [id], onDelete: Cascade)
+  friend    User     @relation("FriendOfUser", fields: [friendId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, friendId])
+  @@index([userId])
+  @@index([friendId])
 }

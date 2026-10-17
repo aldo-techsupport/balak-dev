@@ -3,6 +3,7 @@ import { getSocket } from '@/lib/socket';
 import { sound } from '@/lib/audio';
 import { useAuthStore } from './authStore';
 import { useGameStore } from './gameStore';
+import { useVoiceStore } from './voiceStore';
 
 export interface RoomPlayer {
   userId: string;
@@ -14,6 +15,7 @@ export interface RoomPlayer {
   rankTier?: string;
   rankDivision?: string;
   rankStars?: number;
+  wins?: number;
   isBot?: boolean;
   isReady: boolean;
   isConnected: boolean;
@@ -143,8 +145,16 @@ export const useRoomStore = create<RoomState>((set, get) => ({
       sound.playTileClick();
     });
 
-    socket.on('room:player-left', () => {
+    socket.on('room:player-left', (data: { userId: string }) => {
       sound.playPass();
+      if (data?.userId) {
+        useVoiceStore.getState().removePeerByUserId(data.userId);
+      }
+    });
+
+    socket.on('room:kicked', () => {
+      useVoiceStore.getState().leaveVoiceRoom();
+      set({ currentRoom: null, error: 'Anda telah dikeluarkan dari meja oleh host.' });
     });
 
     socket.on('room:started', () => {
@@ -277,6 +287,7 @@ export const useRoomStore = create<RoomState>((set, get) => ({
     if (room) {
       const socket = getSocket();
       socket.emit('room:leave', { roomCode: room.code });
+      useVoiceStore.getState().leaveVoiceRoom();
       set({ currentRoom: null, chatMessages: [] });
     }
   },

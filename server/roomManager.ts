@@ -110,6 +110,7 @@ export class RoomManager {
       rankTier: params.hostUser.rankTier || 'WARRIOR',
       rankDivision: params.hostUser.rankDivision || 'III',
       rankStars: params.hostUser.rankStars || 0,
+      wins: (params.hostUser as any).wins || 0,
       isReady: true, // Host is ready by default
       isConnected: true,
       isHost: true,
@@ -227,6 +228,7 @@ export class RoomManager {
       rankTier: user.rankTier || 'WARRIOR',
       rankDivision: user.rankDivision || 'III',
       rankStars: user.rankStars || 0,
+      wins: (user as any).wins || 0,
       isReady: false,
       isConnected: true,
       isHost: false,
@@ -396,6 +398,7 @@ export class RoomManager {
       rankTier: availableBot.rankTier,
       rankDivision: availableBot.rankDivision,
       rankStars: availableBot.rankStars,
+      wins: 15,
       isReady: true, // Bots are ready immediately
       isConnected: true,
       isHost: false,

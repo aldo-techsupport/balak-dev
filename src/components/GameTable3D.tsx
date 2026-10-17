@@ -23,9 +23,20 @@ import {
   Shield,
   Crown,
   Check,
+  Mic,
+  MicOff,
+  Users,
+  Pause,
+  Play,
+  Copy,
+  Sliders,
+  X,
 } from 'lucide-react';
 import { sound } from '@/lib/audio';
 import { getRankInfo } from '@/lib/rank';
+import { useVoiceStore } from '@/stores/voiceStore';
+import { FriendModal } from './FriendModal';
+import { OptionModal } from './OptionModal';
 
 const AVATAR_ICONS: Record<string, string> = {
   avatar_1: '🦁',
@@ -273,16 +284,39 @@ export const GameTable3D: React.FC = () => {
     initGameSocketListeners,
   } = useGameStore();
 
+  const {
+    isMicOn,
+    isSpeaking,
+    isAudioBlocked,
+    unlockAudio,
+    speakingUsers,
+    mutedUsers,
+    toggleMic,
+  } = useVoiceStore();
+
   const [timeLeft, setTimeLeft] = useState<number>(20);
   const [chatOpen, setChatOpen] = useState<boolean>(false);
   const [chatInput, setChatInput] = useState<string>('');
   const [soundEnabled, setSoundEnabled] = useState<boolean>(true);
   const [cameraMode, setCameraMode] = useState<'3D' | 'TOP'>('3D');
+  const [showFriendModal, setShowFriendModal] = useState<boolean>(false);
+  const [isSidebarOpen, setIsSidebarOpen] = useState<boolean>(false);
+  const [showOptionModal, setShowOptionModal] = useState<boolean>(false);
+  const [tableTheme, setTableTheme] = useState<'EMERALD' | 'SAPPHIRE' | 'CRIMSON'>('EMERALD');
+  const [copiedCode, setCopiedCode] = useState<boolean>(false);
 
   const sceneRef = useRef<THREE.Scene | null>(null);
   const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
   const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
   const dominoMeshesRef = useRef<THREE.Object3D[]>([]);
+  const feltMatRef = useRef<THREE.MeshStandardMaterial | null>(null);
+
+  const handleCopyCode = () => {
+    if (!currentRoom?.code) return;
+    navigator.clipboard.writeText(currentRoom.code);
+    setCopiedCode(true);
+    setTimeout(() => setCopiedCode(false), 2000);
+  };
 
   // Initialize socket listeners for this user & sync state
   useEffect(() => {
@@ -372,11 +406,32 @@ export const GameTable3D: React.FC = () => {
     feltMesh.receiveShadow = true;
     feltMesh.position.y = -0.25;
     tableGroup.add(feltMesh);
+    feltMatRef.current = feltMat;
 
-    // Mahogany Wood Rim
-    const rimGeo = new THREE.TorusGeometry(16.2, 0.8, 16, 64);
+    // Gold Outer Inlay Ring on Felt
+    const goldRingGeo = new THREE.RingGeometry(14.8, 15.05, 64);
+    const goldRingMat = new THREE.MeshStandardMaterial({
+      color: 0xd4af37,
+      roughness: 0.25,
+      metalness: 0.75,
+      side: THREE.DoubleSide,
+    });
+    const goldRingMesh = new THREE.Mesh(goldRingGeo, goldRingMat);
+    goldRingMesh.rotation.x = -Math.PI / 2;
+    goldRingMesh.position.y = 0.01;
+    tableGroup.add(goldRingMesh);
+
+    // Inner Gold Accent Ring
+    const innerRingGeo = new THREE.RingGeometry(9.5, 9.7, 64);
+    const innerRingMesh = new THREE.Mesh(innerRingGeo, goldRingMat);
+    innerRingMesh.rotation.x = -Math.PI / 2;
+    innerRingMesh.position.y = 0.01;
+    tableGroup.add(innerRingMesh);
+
+    // Mahogany Wood Outer Rim
+    const rimGeo = new THREE.TorusGeometry(16.2, 0.85, 24, 64);
     const rimMat = new THREE.MeshStandardMaterial({
-      color: 0x451a03, // Rich warm mahogany wood
+      color: 0x3d1706, // Rich warm mahogany wood
       roughness: 0.35,
       metalness: 0.25,
     });
@@ -400,16 +455,23 @@ export const GameTable3D: React.FC = () => {
       const w = container.clientWidth || window.innerWidth;
       const h = container.clientHeight || window.innerHeight;
       camera.aspect = w / h;
-      camera.fov = h < 500 ? 55 : (w < h ? 55 : 45);
+      if (w < h) {
+        // Mobile portrait: widen FOV proportionally so domino chain is never cut off
+        camera.fov = Math.max(54, Math.min(68, 52 * (h / w)));
+      } else {
+        camera.fov = 45;
+      }
       camera.updateProjectionMatrix();
-      renderer.setSize(w, h);
+      renderer.setSize(w, h, false);
     };
 
     window.addEventListener('resize', handleResize);
+    window.addEventListener('orientationchange', handleResize);
 
     return () => {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
+      window.removeEventListener('orientationchange', handleResize);
       renderer.dispose();
       if (container.contains(renderer.domElement)) {
         container.removeChild(renderer.domElement);
@@ -420,16 +482,30 @@ export const GameTable3D: React.FC = () => {
   // Update Camera Mode
   useEffect(() => {
     if (!cameraRef.current || !mountRef.current) return;
-    const isMobile = mountRef.current.clientWidth < mountRef.current.clientHeight;
+    const w = mountRef.current.clientWidth;
+    const h = mountRef.current.clientHeight;
+    const isMobileAspect = w < h;
     const camera = cameraRef.current;
     if (cameraMode === 'TOP') {
-      camera.position.set(0, isMobile ? 30 : 25, 0.01);
+      camera.position.set(0, isMobileAspect ? 32 : 25, 0.01);
       camera.lookAt(0, 0, 0);
     } else {
-      camera.position.set(0, isMobile ? 22 : 18, isMobile ? 16 : 16);
-      camera.lookAt(0, 0, 0);
+      camera.position.set(0, isMobileAspect ? 24 : 18, isMobileAspect ? 18 : 16);
+      camera.lookAt(0, -0.5, 0);
     }
   }, [cameraMode]);
+
+  // Update Table Felt Color based on selected theme
+  useEffect(() => {
+    if (!feltMatRef.current) return;
+    if (tableTheme === 'SAPPHIRE') {
+      feltMatRef.current.color.setHex(0x0f3460);
+    } else if (tableTheme === 'CRIMSON') {
+      feltMatRef.current.color.setHex(0x7f1d1d);
+    } else {
+      feltMatRef.current.color.setHex(0x097954);
+    }
+  }, [tableTheme]);
 
   // Update 3D Domino Meshes on the table with REAL 3D PIPS (DOTS)
   useEffect(() => {
@@ -577,6 +653,12 @@ export const GameTable3D: React.FC = () => {
   const opponents = currentRoom?.players?.filter((p) => p.userId !== user?.id) || [];
   const canPass = isMyTurn && playableIds.length === 0 && !isActionInProgress;
 
+  // Turn Player Display Info for Top Header HUD
+  const currentTurnPlayer = currentRoom?.players?.find((p) => p.userId === gameState?.currentTurnUserId);
+  const isCurrentTurnMe = isMyTurn;
+  const isCurrentTurnSpeaking = currentTurnPlayer ? Boolean(speakingUsers[currentTurnPlayer.userId]) : false;
+  const currentTurnWins = currentTurnPlayer?.wins ?? (currentTurnPlayer?.userId === user?.id ? user?.wins ?? 0 : 0);
+
   // Compute sorted player hand
   const sortedHand = useMemo(() => {
     const hand = [...myHand];
@@ -664,97 +746,130 @@ export const GameTable3D: React.FC = () => {
         </div>
       ) : (
         <>
-          {/* TOP HEADER HUD */}
-          <div className="relative z-20 flex items-center justify-between p-2 sm:p-3 pointer-events-none">
-            {/* Left: Room Badge */}
-            <div className="pointer-events-auto flex items-center gap-2 bg-slate-900/95 backdrop-blur-md px-3 py-1.5 rounded-2xl border border-slate-700/60 shadow-lg">
-              <span className="font-bold text-white text-xs sm:text-sm truncate max-w-[140px] sm:max-w-none">
-                {currentRoom.name}
-              </span>
-          <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
-            {currentRoom.mode === 'TEAM_BATTLE' ? '2v2' : 'Solo'}
-          </span>
-          <span className="text-[10px] text-amber-400 font-mono font-bold hidden sm:inline">
-            #{currentRoom.code}
-          </span>
-        </div>
+          {/* TOP HEADER HUD - CLEAN & MINIMALIST */}
+          <div className="relative z-30 flex items-center justify-between px-2.5 sm:px-4 py-2 sm:py-3 pointer-events-none w-full">
+            {/* Top-Left: Pause / Menu Button (Opens Sidebar) */}
+            <div className="pointer-events-auto flex items-center">
+              <button
+                onClick={() => setIsSidebarOpen(true)}
+                className="w-9 h-9 sm:w-10 sm:h-10 rounded-2xl bg-slate-900/90 hover:bg-slate-800 border border-amber-500/40 text-amber-400 hover:text-amber-300 shadow-[0_0_15px_rgba(245,158,11,0.2)] flex items-center justify-center transition active:scale-95"
+                title="Pause / Menu Meja"
+              >
+                <Pause className="w-4 h-4 sm:w-5 sm:h-5 fill-amber-400/20" />
+              </button>
+            </div>
 
-        {/* Center: Chain Ends Indicator & Turn Timer */}
-        <div className="pointer-events-auto flex items-center gap-2 sm:gap-3 bg-slate-900/95 backdrop-blur-md px-3.5 py-1.5 rounded-2xl border border-slate-700/70 shadow-xl">
-          <div className="flex items-center gap-1.5">
-            <span className="text-[10px] text-slate-400 font-medium">Ujung:</span>
-            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold font-mono">
-              {gameState.leftEnd !== null ? gameState.leftEnd : '-'}
-            </span>
-            <span className="text-slate-500 text-xs">◀▶</span>
-            <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40 text-xs font-bold font-mono">
-              {gameState.rightEnd !== null ? gameState.rightEnd : '-'}
-            </span>
+            {/* Top-Center: Current Turn Player + Win Count + Turn Timer */}
+            <div className="pointer-events-auto flex items-center gap-2 sm:gap-3 bg-slate-900/95 backdrop-blur-md px-3 sm:px-4 py-1.5 sm:py-2 rounded-2xl border border-amber-500/40 shadow-2xl">
+              {/* Player Avatar */}
+              <div className="relative shrink-0">
+                <span className={`text-xl sm:text-2xl inline-block ${isCurrentTurnSpeaking ? 'scale-110 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]' : ''}`}>
+                  {currentTurnPlayer?.avatar ? AVATAR_ICONS[currentTurnPlayer.avatar] : '🦁'}
+                </span>
+                {isCurrentTurnSpeaking && (
+                  <span className="absolute -bottom-1 -right-1 w-3.5 h-3.5 bg-emerald-500 rounded-full flex items-center justify-center animate-bounce shadow">
+                    <Mic className="w-2 h-2 text-slate-950" />
+                  </span>
+                )}
+              </div>
+
+              {/* Name & Win Count */}
+              <div className="text-left overflow-hidden">
+                <div className="flex items-center gap-1.5">
+                  <span className="font-black text-xs sm:text-sm text-white truncate max-w-[85px] sm:max-w-[150px]">
+                    {isCurrentTurnMe ? 'Giliran Anda' : (currentTurnPlayer?.nickname || 'Lawan')}
+                  </span>
+                  {currentTurnPlayer?.isBot && (
+                    <span className="text-[7px] sm:text-[8px] px-1 py-0.2 rounded bg-rose-500/30 text-rose-300 border border-rose-500/40 font-bold shrink-0">
+                      BOT
+                    </span>
+                  )}
+                  {currentRoom?.mode === 'TEAM_BATTLE' && (
+                    <span
+                      className={`text-[7px] sm:text-[8px] px-1.5 py-0.2 rounded font-black shrink-0 ${
+                        currentTurnPlayer?.team === 'TEAM_A'
+                          ? 'bg-red-500/30 text-red-300 border border-red-500/40'
+                          : 'bg-blue-500/30 text-blue-300 border border-blue-500/40'
+                      }`}
+                    >
+                      {currentTurnPlayer?.team === 'TEAM_A' ? 'MERAH' : 'BIRU'}
+                    </span>
+                  )}
+                </div>
+
+                <div className="flex items-center gap-1.5 text-[10px] sm:text-[11px] text-amber-300 font-bold mt-0.5">
+                  <span className="flex items-center gap-1 text-amber-400">
+                    <Trophy className="w-3 h-3 text-amber-400 shrink-0" />
+                    {currentTurnWins}x Win
+                  </span>
+                  <span className="text-slate-600 hidden sm:inline">•</span>
+                  <span className="text-slate-400 font-normal hidden sm:inline">
+                    {isCurrentTurnMe ? 'Pasang kartu' : 'Berpikir...'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Divider */}
+              <div className="h-6 w-px bg-slate-700/80 mx-0.5 shrink-0" />
+
+              {/* Turn Timer Countdown */}
+              <div className="flex items-center gap-1 shrink-0">
+                <Clock
+                  className={`w-3.5 sm:w-4 h-3.5 sm:h-4 ${
+                    timeLeft <= 5 ? 'text-red-400 animate-bounce' : 'text-emerald-400'
+                  }`}
+                />
+                <span
+                  className={`font-mono font-black text-xs sm:text-sm ${
+                    timeLeft <= 5 ? 'text-red-400' : 'text-slate-200'
+                  }`}
+                >
+                  {timeLeft}s
+                </span>
+              </div>
+            </div>
+
+            {/* Top-Right: ON MIC Toggle Button */}
+            <div className="pointer-events-auto flex items-center">
+              <button
+                onClick={() => toggleMic(currentRoom?.code)}
+                title={isMicOn ? 'Mikrofon Aktif (Klik untuk Mute)' : 'Mikrofon Mati (Klik untuk ON MIC)'}
+                className={`px-2.5 sm:px-3 py-1.5 sm:py-2 rounded-2xl border transition flex items-center gap-1.5 shadow-lg active:scale-95 ${
+                  isMicOn
+                    ? isSpeaking
+                      ? 'bg-emerald-500 text-slate-950 border-emerald-400 shadow-[0_0_20px_rgba(16,185,129,0.8)] animate-pulse'
+                      : 'bg-emerald-950/90 text-emerald-300 border-emerald-500/60 shadow-[0_0_10px_rgba(16,185,129,0.3)]'
+                    : 'bg-slate-900/90 border-slate-700/70 text-slate-400 hover:text-white'
+                }`}
+              >
+                {isMicOn ? (
+                  <Mic className={`w-3.5 sm:w-4 h-3.5 sm:h-4 ${isSpeaking ? 'animate-bounce text-slate-950' : 'text-emerald-400'}`} />
+                ) : (
+                  <MicOff className="w-3.5 sm:w-4 h-3.5 sm:h-4 text-red-400" />
+                )}
+                <span className="text-[10px] sm:text-xs font-black">
+                  {isMicOn ? (isSpeaking ? 'BICARA' : 'ON MIC') : 'MIC OFF'}
+                </span>
+              </button>
+            </div>
           </div>
-
-          <div className="h-4 w-px bg-slate-700" />
-
-          {/* Turn timer */}
-          <div className="flex items-center gap-1">
-            <Clock
-              className={`w-3.5 h-3.5 ${
-                timeLeft <= 5 ? 'text-red-400 animate-bounce' : 'text-emerald-400'
-              }`}
-            />
-            <span
-              className={`font-mono font-black text-xs ${
-                timeLeft <= 5 ? 'text-red-400' : 'text-slate-200'
-              }`}
-            >
-              {timeLeft}s
-            </span>
-          </div>
-        </div>
-
-        {/* Right: Controls */}
-        <div className="pointer-events-auto flex items-center gap-1.5">
-          <button
-            onClick={() => setCameraMode(cameraMode === '3D' ? 'TOP' : '3D')}
-            title="Sudut Kamera"
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-900/90 border border-slate-700/60 text-slate-300 hover:text-white"
-          >
-            <Eye className="w-4 h-4" />
-          </button>
-          <button
-            onClick={toggleSound}
-            title="Suara"
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-900/90 border border-slate-700/60 text-slate-300 hover:text-white"
-          >
-            {soundEnabled ? <Volume2 className="w-4 h-4" /> : <VolumeX className="w-4 h-4 text-red-400" />}
-          </button>
-          <button
-            onClick={() => setChatOpen(!chatOpen)}
-            title="Chat"
-            className="p-1.5 sm:p-2 rounded-xl bg-slate-900/90 border border-slate-700/60 text-slate-300 hover:text-white"
-          >
-            <MessageSquare className="w-4 h-4" />
-          </button>
-          <button
-            onClick={leaveRoom}
-            title="Keluar Meja"
-            className="p-1.5 sm:p-2 rounded-xl bg-red-950/80 border border-red-800/50 text-red-300 hover:bg-red-900"
-          >
-            <LogOut className="w-4 h-4" />
-          </button>
-        </div>
-      </div>
 
       {/* OPPONENTS STATUS (Top of Table) */}
-      <div className="relative z-10 flex justify-center gap-3 px-2 pointer-events-none">
+      <div className="relative z-10 flex justify-center gap-1.5 sm:gap-3 px-2 pointer-events-none max-w-full overflow-x-auto scrollbar-none">
         {opponents.map((opp, idx) => {
           const oppRank = getRankInfo(opp.rankTier, opp.rankDivision, opp.rankStars);
           const isOppRed = opp.team === 'TEAM_A';
           const isOppBlue = opp.team === 'TEAM_B';
+          const isOppSpeaking = Boolean(speakingUsers[opp.userId]);
+          const isOppMuted = Boolean(mutedUsers[opp.userId]);
+
           return (
             <div
               key={opp.userId}
-              className={`flex items-center gap-2 px-3 py-1.5 rounded-2xl backdrop-blur-md border text-xs shadow-md transition ${
-                gameState.currentTurnUserId === opp.userId
+              className={`flex items-center gap-1.5 sm:gap-2 px-2 sm:px-3 py-1 sm:py-1.5 rounded-2xl backdrop-blur-md border text-xs shadow-md transition-all ${
+                isOppSpeaking
+                  ? 'bg-slate-900/95 border-emerald-400 ring-2 ring-emerald-400/80 shadow-[0_0_20px_rgba(16,185,129,0.5)] scale-105'
+                  : gameState.currentTurnUserId === opp.userId
                   ? 'bg-amber-950/80 border-amber-400 ring-2 ring-amber-400/50 text-amber-200'
                   : currentRoom?.mode === 'TEAM_BATTLE'
                   ? isOppRed
@@ -763,25 +878,48 @@ export const GameTable3D: React.FC = () => {
                   : 'bg-slate-900/80 border-slate-800 text-slate-300'
               }`}
             >
-              <span className="text-xl">{opp.avatar ? AVATAR_ICONS[opp.avatar] : (idx === 0 ? '🦁' : idx === 1 ? '🐯' : '🦅')}</span>
-              <div>
-                <div className="flex items-center gap-1.5">
-                  <span className="font-bold block truncate max-w-[85px] text-white">{opp.nickname}</span>
+              <div className="relative shrink-0">
+                <span className={`text-xl sm:text-2xl inline-block ${isOppSpeaking ? 'scale-110 drop-shadow-[0_0_8px_rgba(52,211,153,0.8)]' : ''}`}>
+                  {opp.avatar ? AVATAR_ICONS[opp.avatar] : (idx === 0 ? '🦁' : idx === 1 ? '🐯' : '🦅')}
+                </span>
+                {/* Speaking Mic Indicator */}
+                <div className="absolute -bottom-1 -right-1">
+                  {isOppSpeaking ? (
+                    <span className="w-3.5 h-3.5 rounded-full bg-emerald-500 text-slate-950 flex items-center justify-center text-[8px] shadow animate-bounce">
+                      <Mic className="w-2 h-2" />
+                    </span>
+                  ) : isOppMuted ? (
+                    <span className="w-3.5 h-3.5 rounded-full bg-red-950 border border-red-500 text-red-400 flex items-center justify-center text-[8px]">
+                      <MicOff className="w-2 h-2" />
+                    </span>
+                  ) : (
+                    <span className="w-3.5 h-3.5 rounded-full bg-slate-900 border border-emerald-500/40 text-emerald-400 flex items-center justify-center text-[8px]">
+                      <Mic className="w-2 h-2" />
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="overflow-hidden">
+                <div className="flex items-center gap-1">
+                  <span className="font-bold block truncate max-w-[70px] sm:max-w-[95px] text-white text-[11px] sm:text-xs">
+                    {opp.nickname}
+                  </span>
                   {opp.isBot && (
                     <span className="text-[7px] px-1 py-0.2 rounded bg-rose-500/40 text-rose-200 border border-rose-500/50 font-black">
-                      MYTHIC 100★
+                      BOT
                     </span>
                   )}
                   {currentRoom?.mode === 'TEAM_BATTLE' && (
-                    <span className={`text-[8px] px-1.5 py-0.2 rounded font-black ${isOppRed ? 'bg-red-600/40 text-red-300' : 'bg-blue-600/40 text-blue-300'}`}>
+                    <span className={`text-[7px] sm:text-[8px] px-1 py-0.2 rounded font-black ${isOppRed ? 'bg-red-600/40 text-red-300' : 'bg-blue-600/40 text-blue-300'}`}>
                       {isOppRed ? 'MERAH' : 'BIRU'}
                     </span>
                   )}
                 </div>
                 <div className="flex items-center gap-1 text-[9px] mt-0.5">
                   <span title={oppRank.title}>{oppRank.icon}</span>
-                  <span className="font-mono text-amber-300 font-bold">{oppRank.starsDisplay}</span>
-                  <span className="text-slate-400">• {gameState.opponentTileCounts[opp.userId] ?? 0} kartu</span>
+                  <span className="text-amber-400 font-mono font-bold">🏆 {opp.wins || 0}w</span>
+                  <span className="text-slate-300 font-mono">• {gameState.opponentTileCounts[opp.userId] ?? 0} kartu</span>
                 </div>
               </div>
             </div>
@@ -829,6 +967,19 @@ export const GameTable3D: React.FC = () => {
         </div>
       )}
 
+      {/* AUDIO UNBLOCK BANNER (IF BROWSER BLOCKS AUTOPLAY) */}
+      {isAudioBlocked && (
+        <div className="absolute top-14 left-1/2 -translate-x-1/2 z-50 animate-bounce">
+          <button
+            onClick={() => unlockAudio()}
+            className="flex items-center gap-2 px-4 py-2 bg-gradient-to-r from-amber-500 via-orange-500 to-emerald-500 text-slate-950 font-black text-xs rounded-full shadow-[0_0_30px_rgba(245,158,11,0.6)] border border-yellow-200 active:scale-95 transition"
+          >
+            <Volume2 className="w-4 h-4 animate-pulse text-slate-950" />
+            <span>🔊 Browser Menahan Suara Teman — Klik Di Sini untuk Mengaktifkan</span>
+          </button>
+        </div>
+      )}
+
       {/* ERROR BANNER */}
       {errorMessage && (
         <div className="absolute top-14 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 bg-red-950/90 border border-red-500 text-red-200 px-4 py-1.5 rounded-xl text-xs shadow-lg">
@@ -838,16 +989,16 @@ export const GameTable3D: React.FC = () => {
       )}
 
       {/* BOTTOM FIXED HUD: ALWAYS VISIBLE PLAYER HAND RACK */}
-      <div className="mt-auto relative z-20 flex flex-col items-center pb-2 px-2 pointer-events-none">
-        {/* Turn Status Alert */}
-        <div className="mb-1">
+      <div className="mt-auto relative z-20 flex flex-col items-center pb-2 px-1 sm:px-2 pointer-events-none w-full max-w-full">
+        {/* Turn Status Alert & Speaking Indicator */}
+        <div className="mb-1 flex items-center gap-2">
           {isMyTurn ? (
-            <div className="pointer-events-auto flex items-center gap-1.5 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 text-slate-950 px-4 py-0.5 rounded-full font-black text-[11px] sm:text-xs shadow-[0_0_20px_rgba(251,191,36,0.7)] animate-pulse">
+            <div className="pointer-events-auto flex items-center gap-1.5 bg-gradient-to-r from-amber-500 via-amber-400 to-yellow-300 text-slate-950 px-3.5 py-0.5 rounded-full font-black text-[10px] sm:text-xs shadow-[0_0_20px_rgba(251,191,36,0.7)] animate-pulse">
               <Sparkles className="w-3.5 h-3.5" />
               <span>GILIRAN ANDA! KLIK KARTU UNTUK MEMASANG</span>
             </div>
           ) : (
-            <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/60 text-slate-300 px-3 py-0.5 rounded-full text-[11px] font-medium shadow-md">
+            <div className="bg-slate-900/90 backdrop-blur-md border border-slate-700/60 text-slate-300 px-3 py-0.5 rounded-full text-[10px] sm:text-[11px] font-medium shadow-md">
               Menunggu giliran{' '}
               <span className="text-amber-400 font-bold">
                 {currentRoom.players.find((p) => p.userId === gameState.currentTurnUserId)?.nickname || 'lawan'}
@@ -855,16 +1006,30 @@ export const GameTable3D: React.FC = () => {
               ...
             </div>
           )}
+
+          {/* Quick Voice Indicator for current user */}
+          {isMicOn && (
+            <div
+              className={`pointer-events-auto px-2 py-0.5 rounded-full text-[9px] font-black flex items-center gap-1 transition ${
+                isSpeaking
+                  ? 'bg-emerald-500 text-slate-950 shadow-[0_0_12px_rgba(16,185,129,0.8)] animate-bounce'
+                  : 'bg-slate-900/90 text-emerald-400 border border-emerald-500/40'
+              }`}
+            >
+              <Mic className="w-2.5 h-2.5" />
+              <span>{isSpeaking ? 'BICARA' : 'MIC ON'}</span>
+            </div>
+          )}
         </div>
 
-        {/* Hand Rack Container (Fits on all screens) */}
-        <div className="pointer-events-auto flex items-center justify-center gap-1.5 sm:gap-2.5 bg-slate-900/95 backdrop-blur-2xl border-2 border-slate-700/80 rounded-3xl p-2 sm:p-2.5 shadow-[0_15px_40px_rgba(0,0,0,0.9)] max-w-full overflow-x-auto">
+        {/* Hand Rack Container (Fits on all screens without offset) */}
+        <div className="pointer-events-auto flex items-center justify-center gap-1 sm:gap-2 bg-slate-900/95 backdrop-blur-2xl border-2 border-slate-700/80 rounded-3xl p-1.5 sm:p-2.5 shadow-[0_15px_40px_rgba(0,0,0,0.9)] max-w-full overflow-hidden">
           {/* Action Button: Pass */}
           <button
             onClick={() => passTurn(currentRoom.code)}
             disabled={!canPass}
             className={`
-              flex flex-col items-center justify-center px-2.5 sm:px-3 py-2 rounded-2xl font-black text-[10px] sm:text-xs uppercase tracking-wider transition-all shrink-0
+              flex flex-col items-center justify-center px-2 sm:px-3 py-1.5 sm:py-2 rounded-2xl font-black text-[9px] sm:text-xs uppercase tracking-wider transition-all shrink-0
               ${
                 canPass
                   ? 'bg-gradient-to-b from-amber-500 to-amber-700 text-slate-950 shadow-[0_0_15px_rgba(245,158,11,0.6)] hover:brightness-110 active:scale-95'
@@ -872,7 +1037,7 @@ export const GameTable3D: React.FC = () => {
               }
             `}
           >
-            <RotateCcw className="w-3.5 h-3.5 mb-0.5" />
+            <RotateCcw className="w-3 sm:w-3.5 h-3 sm:h-3.5 mb-0.5" />
             <span>Lewat</span>
           </button>
 
@@ -884,14 +1049,14 @@ export const GameTable3D: React.FC = () => {
               setSortMode(next);
             }}
             title="Urutkan kartu tangan"
-            className="flex flex-col items-center justify-center px-2 sm:px-2.5 py-2 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 text-slate-300 hover:text-amber-300 font-bold text-[9px] sm:text-[10px] tracking-wide transition shrink-0 active:scale-95"
+            className="flex flex-col items-center justify-center px-1.5 sm:px-2.5 py-1.5 sm:py-2 rounded-2xl bg-slate-800/90 hover:bg-slate-700/90 border border-slate-700/70 text-slate-300 hover:text-amber-300 font-bold text-[8px] sm:text-[10px] tracking-wide transition shrink-0 active:scale-95"
           >
-            <ArrowUpDown className="w-3.5 h-3.5 mb-0.5 text-amber-400" />
+            <ArrowUpDown className="w-3 sm:w-3.5 h-3 sm:h-3.5 mb-0.5 text-amber-400" />
             <span>{sortMode === 'BALAK_FIRST' ? 'Balak' : sortMode === 'SUM_DESC' ? 'Besar' : 'Kecil'}</span>
           </button>
 
-          {/* Player Domino Tiles Hand: Perfectly aligned & sorted */}
-          <div className="flex items-end gap-1 sm:gap-2 py-1 overflow-x-auto max-w-[calc(100vw-135px)] sm:max-w-none px-1">
+          {/* Player Domino Tiles Hand: Responsive and smooth */}
+          <div className="flex items-end gap-1 sm:gap-1.5 py-1 overflow-x-auto max-w-[calc(100vw-110px)] sm:max-w-none px-1 scrollbar-none">
             {sortedHand.length === 0 ? (
               <span className="text-xs text-slate-400 py-3 px-4 font-semibold">
                 Kartu Anda telah habis!
@@ -1151,6 +1316,234 @@ export const GameTable3D: React.FC = () => {
       })()}
         </>
       )}
+
+      {/* SIDEBAR DRAWER (PAUSE MENU) */}
+      {isSidebarOpen && (
+        <div className="fixed inset-0 z-50 flex select-none">
+          {/* Backdrop */}
+          <div
+            className="fixed inset-0 bg-black/70 backdrop-blur-sm transition-opacity"
+            onClick={() => setIsSidebarOpen(false)}
+          />
+
+          {/* Slide-out Drawer */}
+          <div className="relative z-10 w-72 sm:w-80 bg-slate-950/95 backdrop-blur-2xl border-r border-amber-500/40 shadow-[15px_0_50px_rgba(0,0,0,0.9)] flex flex-col p-4 sm:p-5 h-full animate-slide-left overflow-y-auto">
+            {/* Drawer Header */}
+            <div className="flex items-center justify-between pb-3.5 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-8 h-8 rounded-xl bg-amber-500/20 border border-amber-500/40 flex items-center justify-center text-amber-400 shadow-md">
+                  <Pause className="w-4 h-4 fill-amber-400/40" />
+                </div>
+                <div>
+                  <h3 className="text-sm sm:text-base font-black text-white uppercase tracking-wider">
+                    Menu Meja
+                  </h3>
+                  <p className="text-[10px] text-slate-400">Pertandingan Berlangsung</p>
+                </div>
+              </div>
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="p-1.5 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 hover:text-white transition"
+                title="Tutup Menu"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+
+            {/* Room Info Card */}
+            <div className="mt-4 p-3 rounded-2xl bg-slate-900/80 border border-slate-800/80 space-y-2.5 shrink-0">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-white text-xs truncate max-w-[150px]">
+                  {currentRoom?.name || 'Meja Domino'}
+                </span>
+                <span className="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
+                  {currentRoom?.mode === 'TEAM_BATTLE' ? '2v2 Team' : 'Solo'}
+                </span>
+              </div>
+
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[11px]">
+                <span className="text-slate-400">Kode Room:</span>
+                <button
+                  onClick={handleCopyCode}
+                  className="flex items-center gap-1.5 font-mono font-bold text-amber-400 hover:text-amber-300 bg-slate-950 px-2 py-1 rounded-lg border border-slate-800 transition active:scale-95"
+                  title="Salin Kode Meja"
+                >
+                  {copiedCode ? <Check className="w-3 h-3 text-emerald-400" /> : <Copy className="w-3 h-3" />}
+                  <span>#{currentRoom?.code}</span>
+                </button>
+              </div>
+
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-slate-400">Ronde:</span>
+                <span className="font-bold text-slate-200">
+                  Ronde #{currentRoom?.roundNumber || 1}
+                </span>
+              </div>
+
+              {/* Chain Ends Status */}
+              <div className="flex items-center justify-between pt-1 border-t border-slate-800/60 text-[11px]">
+                <span className="text-slate-400">Ujung Meja:</span>
+                <div className="flex items-center gap-1.5 font-mono font-bold text-xs">
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    {gameState?.leftEnd !== null ? gameState?.leftEnd : '-'}
+                  </span>
+                  <span className="text-slate-500">◀▶</span>
+                  <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 border border-amber-500/40">
+                    {gameState?.rightEnd !== null ? gameState?.rightEnd : '-'}
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            {/* Action Items List */}
+            <div className="mt-4 space-y-2 flex-1">
+              {/* Camera Angle Toggle */}
+              <button
+                onClick={() => setCameraMode(cameraMode === '3D' ? 'TOP' : '3D')}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Eye className="w-4 h-4 text-cyan-400" />
+                  <div>
+                    <p className="text-xs font-bold text-white">Sudut Kamera</p>
+                    <p className="text-[10px] text-slate-400">
+                      {cameraMode === '3D' ? 'Perspektif 3D' : 'Pandangan Atas (2D Top)'}
+                    </p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-black px-2 py-0.5 rounded bg-slate-800 text-cyan-300 border border-slate-700">
+                  {cameraMode}
+                </span>
+              </button>
+
+              {/* Sound SFX Toggle */}
+              <button
+                onClick={toggleSound}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  {soundEnabled ? (
+                    <Volume2 className="w-4 h-4 text-emerald-400" />
+                  ) : (
+                    <VolumeX className="w-4 h-4 text-red-400" />
+                  )}
+                  <div>
+                    <p className="text-xs font-bold text-white">Efek Suara Domino</p>
+                    <p className="text-[10px] text-slate-400">Ketukan balak & giliran</p>
+                  </div>
+                </div>
+                <span
+                  className={`text-[10px] font-black px-2 py-0.5 rounded border ${
+                    soundEnabled
+                      ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                      : 'bg-red-500/20 text-red-300 border-red-500/40'
+                  }`}
+                >
+                  {soundEnabled ? 'ON' : 'OFF'}
+                </span>
+              </button>
+
+              {/* Friend List */}
+              <button
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  setShowFriendModal(true);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Users className="w-4 h-4 text-amber-400" />
+                  <div>
+                    <p className="text-xs font-bold text-white">Daftar & Ajak Teman</p>
+                    <p className="text-[10px] text-slate-400">Lihat teman online & undang</p>
+                  </div>
+                </div>
+                <span className="text-[10px] text-slate-400 font-bold">Buka ›</span>
+              </button>
+
+              {/* Chat Meja */}
+              <button
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  setChatOpen(true);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <MessageSquare className="w-4 h-4 text-emerald-400" />
+                  <div>
+                    <p className="text-xs font-bold text-white">Obrolan Meja (Chat)</p>
+                    <p className="text-[10px] text-slate-400">Pesan & emote pemain</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300 border border-slate-700">
+                  {chatMessages.length} pesan
+                </span>
+              </button>
+
+              {/* Settings / OptionModal */}
+              <button
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  setShowOptionModal(true);
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-slate-900/70 hover:bg-slate-900 border border-slate-800 hover:border-slate-700 text-left transition"
+              >
+                <div className="flex items-center gap-2.5">
+                  <Sliders className="w-4 h-4 text-yellow-400" />
+                  <div>
+                    <p className="text-xs font-bold text-white">Pengaturan Meja</p>
+                    <p className="text-[10px] text-slate-400">Warna meja & tes suara mic</p>
+                  </div>
+                </div>
+                <span className="text-[10px] text-slate-400 font-bold">Buka ›</span>
+              </button>
+
+              {/* Keluar Meja */}
+              <button
+                onClick={() => {
+                  setIsSidebarOpen(false);
+                  leaveRoom();
+                }}
+                className="w-full flex items-center justify-between p-3 rounded-2xl bg-red-950/40 hover:bg-red-900/60 border border-red-800/50 text-left transition group"
+              >
+                <div className="flex items-center gap-2.5">
+                  <LogOut className="w-4 h-4 text-red-400 group-hover:scale-110 transition" />
+                  <div>
+                    <p className="text-xs font-bold text-red-200">Keluar Meja</p>
+                    <p className="text-[10px] text-red-400/80">Tinggalkan permainan ke lobby</p>
+                  </div>
+                </div>
+                <span className="text-[10px] font-bold text-red-400">Keluar ›</span>
+              </button>
+            </div>
+
+            {/* Footer Resume Button */}
+            <div className="mt-4 pt-3 border-t border-slate-800 shrink-0">
+              <button
+                onClick={() => setIsSidebarOpen(false)}
+                className="w-full py-2.5 px-4 rounded-xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs shadow-lg flex items-center justify-center gap-2 active:scale-95 transition"
+              >
+                <Play className="w-3.5 h-3.5 fill-slate-950" />
+                <span>Lanjut Bermain</span>
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* OPTION / SETTINGS MODAL */}
+      {showOptionModal && (
+        <OptionModal
+          onClose={() => setShowOptionModal(false)}
+          roomCode={currentRoom?.code}
+          tableTheme={tableTheme}
+          onThemeChange={(t) => setTableTheme(t)}
+        />
+      )}
+
+      {/* FRIEND LIST MODAL */}
+      {showFriendModal && <FriendModal onClose={() => setShowFriendModal(false)} />}
     </div>
   );
 };

@@ -623,7 +623,7 @@ export default function AdminPage() {
 
               <div className="p-5 rounded-2xl bg-slate-900/80 border border-slate-800 shadow-xl">
                 <div className="flex items-center justify-between text-slate-400 mb-2">
-                  <span className="text-xs font-bold uppercase tracking-wider">Meja Real-time</span>
+                  <span className="text-xs font-bold uppercase tracking-wider">Meja Aktif</span>
                   <Gamepad2 className="w-4 h-4 text-amber-400" />
                 </div>
                 <div className="text-2xl sm:text-3xl font-black text-amber-300 font-mono">
